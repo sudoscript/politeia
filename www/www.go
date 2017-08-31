@@ -13,6 +13,7 @@ type Moo struct {
 }
 
 func myFunc2(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("got myFunc2\n")
 	reply := Moo{IsMoo: "yep"}
 	util.RespondWithJSON(w, http.StatusOK, reply)
 }

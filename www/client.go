@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/davecgh/go-spew/spew"
 )
@@ -26,14 +27,19 @@ func main() {
 	ss := strings.SplitN(s[0], "=", 2)
 	spew.Dump(ss)
 
+	fmt.Printf("===============\n")
 	// lift csrf cookie
-	req, err = http.NewRequest("POST", "http://127.0.0.1:8000", r)
-	req.Header.Add("X-CSRF-Token", ss[1])
-	req.Header = resp.Header
-	resp, err = client.Do(req)
+	r2 := bytes.NewReader(buf)
+	req2, err := http.NewRequest("POST", "http://127.0.0.1:8000", r2)
+	req2.Header.Add("X-CSRF-Token", ss[1])
+	expiration := time.Now().Add(365 * 24 * time.Hour)
+	cookie := http.Cookie{Name: "csrf_token", Value: ss[1], Expires: expiration}
+	req2.AddCookie(&cookie)
+	spew.Dump(req2.Header)
+	resp2, err := client.Do(req2)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
 		return
 	}
-	spew.Dump(resp.Body)
+	spew.Dump(resp2.Body)
 }
