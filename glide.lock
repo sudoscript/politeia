@@ -1,5 +1,5 @@
-hash: c27b53c16c73b4491afb7cb14bae797d48fb773ad4bb3c4cf95d39cbdb717a06
-updated: 2017-08-10T16:11:25.592591457-05:00
+hash: 4a3d3ef7adc7b851168b472182c3ccdb2ad759c808aa4828738db3f3d5047715
+updated: 2017-08-31T12:24:53.284922172-05:00
 imports:
 - name: github.com/agl/ed25519
   version: 278e1ec8e8a6e017cd07577924d6766039146ced
@@ -51,6 +51,8 @@ imports:
   version: a93b200c26cbae3bb09dd0dc2c7c7fe1468a034a
   subpackages:
   - rotator
+- name: github.com/justinas/nosurf
+  version: 7245927c2cec58a9ae6a33179cc7c76363fbb88f
 - name: github.com/kennygrant/sanitize
   version: 6a0bfdde8629a3a3a7418a7eae45c54154692514
 - name: github.com/marcopeereboom/lockfile

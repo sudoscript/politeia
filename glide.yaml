@@ -29,3 +29,5 @@ import:
   - spew
 - package: github.com/robfig/cron
   version: ~1.0.0
+- package: github.com/justinas/nosurf
+  version: ^0.1.0
