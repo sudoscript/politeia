@@ -22,12 +22,13 @@ func main() {
 		return
 	}
 	spew.Dump(resp.Header["Set-Cookie"])
-	s := strings.Split(resp.Header["Set-Cookie"][0], "=")
-	spew.Dump(s)
+	s := strings.Split(resp.Header["Set-Cookie"][0], ";")
+	ss := strings.SplitN(s[0], "=", 2)
+	spew.Dump(ss)
 
 	// lift csrf cookie
-	req, err = http.NewRequest("POST", "http://127.0.0.1:8000", nil)
-	req.Header.Add("X-CSRF-Token", s[1])
+	req, err = http.NewRequest("POST", "http://127.0.0.1:8000", r)
+	req.Header.Add("X-CSRF-Token", ss[1])
 	req.Header = resp.Header
 	resp, err = client.Do(req)
 	if err != nil {
