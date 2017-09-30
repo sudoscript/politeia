@@ -74,8 +74,9 @@ type config struct {
 	MailServerUser     string `long:"mailserveruser" description:"Email server username"`
 	MailServerPass     string `long:"mailserverpass" description:"Email server password"`
 	SMTP               *goemail.SMTP
-	SkipTLSVerify      bool `long:"skiptlsverify" description:"Whether or not politeiawww verifies politeiad's certificate."`
-	FetchIdentity      bool `long:"fetchidentity" description:"Whether or not politeiawww fetches the identity from politeiad."`
+	SkipTLSVerify      bool   `long:"skiptlsverify" description:"Whether or not politeiawww verifies politeiad's certificate."`
+	FetchIdentity      bool   `long:"fetchidentity" description:"Whether or not politeiawww fetches the identity from politeiad."`
+	WebServerAddress   string `long:"webserveraddress" description:"Address for the Politeia web server; it should have this format: <scheme>://<host>[:<port>]"`
 }
 
 // serviceOptions defines the configuration options for the daemon as a service
