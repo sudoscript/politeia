@@ -281,7 +281,76 @@ func (b *backend) LoadInventory() error {
 // exist and sets a verification token and expiry; the token must be
 // verified before it expires. If the user already exists in the db
 // and its token is expired, it generates a new one.
-func (b *backend) ProcessNewUser(u v1w.NewUser) (*v1w.NewUserReply, string, error) {
+func (b *backend) VerifyUser(u v1w.NewUser) error {
+	user, err := b.db.UserGet(u.Email)
+	if err != nil {
+		return err
+	}
+
+	// Check if the user is already verified.
+	if user.VerificationToken == nil {
+		return nil
+	}
+
+	// Check if the verification token hasn't expired yet.
+	currentTime := time.Now().Unix()
+	if currentTime < user.VerificationExpiry {
+		return nil
+	}
+
+	// Generate a new verification token and expiry.
+	token, expiry, err = b.generateVerificationTokenAndExpiry()
+	if err != nil {
+		return ErrRetryOfSorts
+	}
+
+	// Add the updated user information to the db.
+	user.VerificationToken = token
+	user.VerificationExpiry = expiry
+	err = b.db.UserUpdate(*user)
+	if err != nil {
+		return ErrInternalError // timestamp log this
+	}
+
+	return nil
+}
+
+func (b *backend) InsertNewUser(u v1w.NewUser) error {
+	// Hash the user's password.
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(u.Password),
+		bcrypt.DefaultCost)
+	if err != nil {
+		return ErrInternalError // timestamp log this
+	}
+
+	// Generate the verification token and expiry.
+	token, expiry, err = b.generateVerificationTokenAndExpiry()
+	if err != nil {
+		return ErrInternalError // timestamp log this
+	}
+
+	// Add the user and hashed password to the db.
+	newUser := database.User{
+		Email:              u.Email,
+		HashedPassword:     hashedPassword,
+		Admin:              false,
+		VerificationToken:  token,
+		VerificationExpiry: expiry,
+	}
+
+	err = b.db.UserNew(newUser)
+	if err != nil {
+		if err == database.ErrInvalidEmail {
+			return ErrInvalidEmail
+		}
+
+		return ErrInternalError // timestamp log this
+	}
+
+	return nil
+}
+
+func (b *backend) ProcessNewUser(u v1w.NewUser) ([]byte, error) {
 	var token []byte
 	var expiry int64
 
@@ -292,15 +361,16 @@ func (b *backend) ProcessNewUser(u v1w.NewUser) (*v1w.NewUserReply, string, erro
 			reply := v1w.NewUserReply{
 				ErrorCode: v1w.StatusSuccess,
 			}
-			return &reply, "", nil
+			return nil, nil
 		}
 
 		// Check if the verification token hasn't expired yet.
-		if currentTime := time.Now().Unix(); currentTime < user.VerificationExpiry {
+		currentTime := time.Now().Unix()
+		if currentTime < user.VerificationExpiry {
 			reply := v1w.NewUserReply{
 				ErrorCode: v1w.StatusSuccess,
 			}
-			return &reply, "", nil
+			return "", nil
 		}
 
 		// Generate a new verification token and expiry.
@@ -309,7 +379,7 @@ func (b *backend) ProcessNewUser(u v1w.NewUser) (*v1w.NewUserReply, string, erro
 			reply := v1w.NewUserReply{
 				ErrorCode: v1w.StatusInvalid,
 			}
-			return &reply, "", err
+			return "", err
 		}
 
 		// Add the updated user information to the db.
@@ -320,7 +390,7 @@ func (b *backend) ProcessNewUser(u v1w.NewUser) (*v1w.NewUserReply, string, erro
 			reply := v1w.NewUserReply{
 				ErrorCode: v1w.StatusInvalid,
 			}
-			return &reply, "", err
+			return "", err
 		}
 	} else {
 		// Hash the user's password.
@@ -330,7 +400,7 @@ func (b *backend) ProcessNewUser(u v1w.NewUser) (*v1w.NewUserReply, string, erro
 			reply := v1w.NewUserReply{
 				ErrorCode: v1w.StatusInvalid,
 			}
-			return &reply, "", err
+			return "", err
 		}
 
 		// Generate the verification token and expiry.
@@ -339,7 +409,7 @@ func (b *backend) ProcessNewUser(u v1w.NewUser) (*v1w.NewUserReply, string, erro
 			reply := v1w.NewUserReply{
 				ErrorCode: v1w.StatusInvalid,
 			}
-			return &reply, "", err
+			return "", err
 		}
 
 		// Add the user and hashed password to the db.
@@ -357,31 +427,22 @@ func (b *backend) ProcessNewUser(u v1w.NewUser) (*v1w.NewUserReply, string, erro
 				reply := v1w.NewUserReply{
 					ErrorCode: v1w.StatusMalformedEmail,
 				}
-				return &reply, "", nil
+				return "", nil
 			}
 
-			reply := v1w.NewUserReply{
-				ErrorCode: v1w.StatusInvalid,
-			}
-			return &reply, "", err
+			return "", err
 		}
 	}
 
 	if !b.test {
 		err := b.emailVerificationLink(u.Email, hex.EncodeToString(token))
 		if err != nil {
-			reply := v1w.NewUserReply{
-				ErrorCode: v1w.StatusInvalid,
-			}
-			return &reply, "", err
+			return "", err
 		}
 	}
 
 	// Reply with an empty response, which indicates success.
-	reply := v1w.NewUserReply{
-		ErrorCode: v1w.StatusSuccess,
-	}
-	return &reply, hex.EncodeToString(token), nil
+	return token, nil
 }
 
 // ProcessVerifyNewUser verifies the token generated for a recently created user.
