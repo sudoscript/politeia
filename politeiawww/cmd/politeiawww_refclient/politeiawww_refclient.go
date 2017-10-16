@@ -148,7 +148,9 @@ func (c *ctx) verifyNewUser(email, token string) error {
 		VerificationToken: token,
 	}
 
-	_, err := c.makeRequest("GET", v1.RouteVerifyNewUser, u)
+	//_, err := c.makeRequest("GET", v1.RouteVerifyNewUser, u)
+	_, err := c.makeRequest("GET", "/user/verify/?email="+email+
+		"&verificationtoken="+token, u)
 	if err != nil {
 		return err
 	}
