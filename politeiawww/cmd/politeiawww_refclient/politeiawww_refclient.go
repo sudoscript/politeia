@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/net/publicsuffix"
 
+	"github.com/decred/politeia/politeiad/api/v1/identity"
 	"github.com/decred/politeia/politeiawww/api/v1"
 	"github.com/decred/politeia/util"
 )
@@ -28,8 +29,9 @@ var (
 )
 
 type ctx struct {
-	client *http.Client
-	csrf   string
+	client   *http.Client
+	identity *identity.FullIdentity
+	csrf     string
 }
 
 func newClient(skipVerify bool) (*ctx, error) {
@@ -45,10 +47,16 @@ func newClient(skipVerify bool) (*ctx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ctx{client: &http.Client{
-		Transport: tr,
-		Jar:       jar,
-	}}, nil
+	id, err := identity.New()
+	if err != nil {
+		return nil, err
+	}
+	return &ctx{
+		identity: id,
+		client: &http.Client{
+			Transport: tr,
+			Jar:       jar,
+		}}, nil
 }
 
 func (c *ctx) makeRequest(method string, route string, b interface{}) ([]byte, error) {
@@ -153,8 +161,9 @@ func (c *ctx) policy() (*v1.PolicyReply, error) {
 
 func (c *ctx) newUser(email, password string) (string, error) {
 	u := v1.NewUser{
-		Email:    email,
-		Password: password,
+		Email:     email,
+		Password:  password,
+		PublicKey: hex.EncodeToString(c.identity.Public.Key[:]),
 	}
 
 	responseBody, err := c.makeRequest("POST", v1.RouteNewUser, u)

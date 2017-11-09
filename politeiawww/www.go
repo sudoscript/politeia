@@ -61,10 +61,7 @@ func (p *politeiawww) getIdentity() error {
 
 	// Pretty print identity.
 	log.Infof("Identity fetched from politeiad")
-	log.Infof("FQDN       : %v", id.Name)
-	log.Infof("Nick       : %v", id.Nick)
 	log.Infof("Key        : %x", id.Key)
-	log.Infof("Identity   : %x", id.Identity)
 	log.Infof("Fingerprint: %v", id.Fingerprint())
 
 	// Ask user if we like this identity
