@@ -86,6 +86,8 @@ const (
 	ErrorStatusUnsupportedMIMEType         ErrorStatusT = 19
 	ErrorStatusInvalidPropStatusTransition ErrorStatusT = 20
 	ErrorStatusInvalidPublicKey            ErrorStatusT = 21
+	ErrorStatusNoPublicKey                 ErrorStatusT = 22
+	ErrorStatusInvalidSignature            ErrorStatusT = 23
 
 	// Proposal status codes (set and get)
 	PropStatusInvalid     PropStatusT = 0 // Invalid status

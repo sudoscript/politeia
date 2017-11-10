@@ -626,6 +626,43 @@ func (b *backend) ProcessVerifyNewUser(u www.VerifyNewUser) error {
 		}
 	}
 
+	// Check signarure
+	signature, err := hex.DecodeString(u.Signature)
+	if err != nil {
+		return www.UserError{
+			ErrorCode: www.ErrorStatusInvalidPublicKey,
+		}
+	}
+	if len(signature) != identity.SignatureSize {
+		return www.UserError{
+			ErrorCode: www.ErrorStatusInvalidPublicKey,
+		}
+	}
+	var (
+		sig [identity.SignatureSize]byte
+		pi  *identity.PublicIdentity
+	)
+	copy(sig[:], signature)
+	for _, v := range user.Identities {
+		if v.Deactivated != 0 {
+			continue
+		}
+		pi, err = identity.PublicIdentityFromBytes(v.Key[:])
+		if err != nil {
+			return err
+		}
+	}
+	if pi == nil {
+		return www.UserError{
+			ErrorCode: www.ErrorStatusNoPublicKey,
+		}
+	}
+	if !pi.VerifyMessage(token, sig) {
+		return www.UserError{
+			ErrorCode: www.ErrorStatusInvalidSignature,
+		}
+	}
+
 	// Clear out the verification token fields in the db.
 	user.NewUserVerificationToken = nil
 	user.NewUserVerificationExpiry = 0

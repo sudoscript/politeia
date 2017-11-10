@@ -182,9 +182,9 @@ func (c *ctx) newUser(email, password string) (string, error) {
 	return nur.VerificationToken, nil
 }
 
-func (c *ctx) verifyNewUser(email, token string) error {
+func (c *ctx) verifyNewUser(email, token, sig string) error {
 	_, err := c.makeRequest("GET", "/user/verify/?email="+email+
-		"&verificationtoken="+token, nil)
+		"&verificationtoken="+token+"&signature="+sig, nil)
 	return err
 }
 
@@ -498,7 +498,12 @@ func _main() error {
 	}
 
 	// Verify New User
-	err = c.verifyNewUser(email, token)
+	tokenBytes, err := hex.DecodeString(token)
+	if err != nil {
+		return err
+	}
+	sig := c.identity.SignMessage(tokenBytes)
+	err = c.verifyNewUser(email, token, hex.EncodeToString(sig[:]))
 	if err != nil {
 		// ugly hack that ignores special redirect handling in verify
 		// user.  We assume we were redirected to the correct page and

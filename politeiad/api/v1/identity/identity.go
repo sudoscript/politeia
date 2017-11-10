@@ -109,6 +109,15 @@ func UnmarshalPublicIdentity(data []byte) (*PublicIdentity, error) {
 	return &pi, nil
 }
 
+func PublicIdentityFromBytes(data []byte) (*PublicIdentity, error) {
+	pi := PublicIdentity{}
+	if len(data) != PublicKeySize {
+		return nil, fmt.Errorf("invalid public key length")
+	}
+	copy(pi.Key[:], data)
+	return &pi, nil
+}
+
 func LoadPublicIdentity(filename string) (*PublicIdentity, error) {
 	idx, err := ioutil.ReadFile(filename)
 	if err != nil {
