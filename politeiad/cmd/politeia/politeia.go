@@ -42,7 +42,7 @@ var (
 	defaultHomeDir          = dcrutil.AppDataDir("politeia", false)
 	defaultIdentityFilename = "identity.json"
 
-	identityFilename = flag.String("-id", filepath.Join(defaultHomeDir,
+	identityFilename = flag.String("id", filepath.Join(defaultHomeDir,
 		defaultIdentityFilename), "remote server identity file")
 	testnet     = flag.Bool("testnet", false, "Use testnet port")
 	printJson   = flag.Bool("json", false, "Print JSON")
@@ -982,6 +982,283 @@ func setUnvettedStatus() error {
 	return nil
 }
 
+func callReferendum() error {
+	// Example command: politeia referendum <token>
+
+	flags := flag.Args()[1:] // Chop off action.
+
+	if len(flags) < 1 {
+		return fmt.Errorf("A censorship token must be provided")
+	}
+	tokenStr := flags[0]
+
+	// Validate censorship token
+	tokenBytes, err := util.ConvertStringToken(tokenStr)
+	if err != nil {
+		return err
+	}
+
+	// Fetch full identity to sign token
+	fullId, err := identity.LoadFullIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
+	// Sign token and create command
+	challenge, err := util.Random(v1.ChallengeSize)
+	if err != nil {
+		return err
+	}
+	signedToken := fullId.SignMessage(tokenBytes)
+
+	// Only send public ID to server to ensure 1 user, 1 vote
+	publicId, err := identity.LoadPublicIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
+	req := v1.ReferendumRequest{
+		Challenge: hex.EncodeToString(challenge),
+		Token:     tokenStr,
+		Signature: signedToken,
+		User:      *publicId,
+	}
+
+	// Convert to JSON
+	b, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	if *printJson {
+		fmt.Println(string(b))
+	}
+
+	c, err := util.NewClient(verify, *rpccert)
+	if err != nil {
+		return err
+	}
+	r, err := c.Post(*rpchost+v1.ReferendumCallRoute, "application/json",
+		bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		e, err := util.GetErrorFromJSON(r.Body)
+		if err != nil {
+			return fmt.Errorf("%v", r.Status)
+		}
+		return fmt.Errorf("%v: %v", r.Status, e)
+	}
+
+	bodyBytes := util.ConvertBodyToByteArray(r.Body, *printJson)
+
+	var reply v1.ReferendumReply
+	err = json.Unmarshal(bodyBytes, &reply)
+	if err != nil {
+		return fmt.Errorf("Could not unmarshal ReferendumReply %v",
+			err)
+	}
+
+	// Verify challenge.
+	// NOT WORKING
+	// err = util.VerifyChallenge(&publicId, challenge, reply.Response)
+	// if err != nil {
+	// 	return err
+	// }
+
+	fmt.Printf("Referendum initiated on proposal: %v\n", flags[0])
+
+	return nil
+}
+
+func voteOnReferendum() error {
+	// Example command: politeia vote reverse|uphold <token>
+
+	flags := flag.Args()[1:] // Chop off action.
+
+	if len(flags) < 2 {
+		return fmt.Errorf("A vote and censorship token must be provided")
+	}
+	voteStr := flags[0]
+	tokenStr := flags[1]
+
+	// Validate censorship token
+	tokenBytes, err := util.ConvertStringToken(tokenStr)
+	if err != nil {
+		return err
+	}
+
+	// Fetch full identity to sign token
+	fullId, err := identity.LoadFullIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
+	// Sign token
+	challenge, err := util.Random(v1.ChallengeSize)
+	if err != nil {
+		return err
+	}
+	signedToken := fullId.SignMessage(tokenBytes)
+
+	// Set vote
+	voteChoice := v1.NullVote
+	switch voteStr {
+	case "reverse":
+		voteChoice = v1.Approve
+	case "uphold":
+		voteChoice = v1.NotApprove
+	default:
+		return fmt.Errorf("Vote needs to be 'reverse' or 'uphold'")
+	}
+
+	// Only send public ID to server to ensure 1 user, 1 vote
+	publicId, err := identity.LoadPublicIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
+	// Create command
+	req := v1.ReferendumVoteRequest{
+		Challenge: hex.EncodeToString(challenge),
+		Token:     tokenStr,
+		Signature: signedToken,
+		User:      *publicId,
+		Vote:      voteChoice,
+	}
+
+	// Convert to JSON
+	b, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	if *printJson {
+		fmt.Println(string(b))
+	}
+
+	c, err := util.NewClient(verify, *rpccert)
+	if err != nil {
+		return err
+	}
+	r, err := c.Post(*rpchost+v1.ReferendumVoteRoute, "application/json",
+		bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		e, err := util.GetErrorFromJSON(r.Body)
+		if err != nil {
+			return fmt.Errorf("%v", r.Status)
+		}
+		return fmt.Errorf("%v: %v", r.Status, e)
+	}
+
+	bodyBytes := util.ConvertBodyToByteArray(r.Body, *printJson)
+
+	var reply v1.ReferendumVoteReply
+	err = json.Unmarshal(bodyBytes, &reply)
+	if err != nil {
+		return fmt.Errorf("Could not unmarshal ReferendumReply %v",
+			err)
+	}
+
+	// Verify challenge.
+	// NOT WORKING
+	// err = util.VerifyChallenge(&publicId, challenge, reply.Response)
+	// if err != nil {
+	// 	return err
+	// }
+
+	fmt.Printf("Voted on referendum. Current status: %v\n", reply.Status)
+
+	return nil
+}
+
+func concludeReferendum() error {
+	// Example command: politeia results <token>
+
+	flags := flag.Args()[1:] // Chop off action.
+
+	if len(flags) < 1 {
+		return fmt.Errorf("A vote and censorship token must be provided")
+	}
+	tokenStr := flags[0]
+
+	// Validate censorship token
+	_, err := util.ConvertStringToken(tokenStr)
+	if err != nil {
+		return err
+	}
+
+	// Create challenge
+	challenge, err := util.Random(v1.ChallengeSize)
+	if err != nil {
+		return err
+	}
+
+	// Create command
+	req := v1.ReferendumResultsRequest{
+		Challenge: hex.EncodeToString(challenge),
+		Token:     tokenStr,
+	}
+
+	// Convert to JSON
+	b, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	if *printJson {
+		fmt.Println(string(b))
+	}
+
+	c, err := util.NewClient(verify, *rpccert)
+	if err != nil {
+		return err
+	}
+	r, err := c.Post(*rpchost+v1.ReferendumResultsRoute, "application/json",
+		bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		e, err := util.GetErrorFromJSON(r.Body)
+		if err != nil {
+			return fmt.Errorf("%v", r.Status)
+		}
+		return fmt.Errorf("%v: %v", r.Status, e)
+	}
+
+	bodyBytes := util.ConvertBodyToByteArray(r.Body, *printJson)
+
+	var reply v1.ReferendumResultsReply
+	err = json.Unmarshal(bodyBytes, &reply)
+	if err != nil {
+		return fmt.Errorf("Could not unmarshal ReferendumReply %v",
+			err)
+	}
+
+	// Verify challenge.
+	// NOT WORKING
+	// err = util.VerifyChallenge(&publicId, challenge, reply.Response)
+	// if err != nil {
+	// 	return err
+	// }
+
+	fmt.Printf("Votes for reversal: %v\n", reply.VotesFor)
+	fmt.Printf("Votes for upholding: %v\n", reply.VotesAgainst)
+
+	return nil
+}
+
 func _main() error {
 	flag.Parse()
 	if len(flag.Args()) == 0 {
@@ -1033,6 +1310,12 @@ func _main() error {
 				return setUnvettedStatus()
 			case "update":
 				return updateRecord()
+			case "referendum":
+				return callReferendum()
+			case "vote":
+				return voteOnReferendum()
+			case "results":
+				return concludeReferendum()
 			default:
 				return fmt.Errorf("invalid action: %v", a)
 			}

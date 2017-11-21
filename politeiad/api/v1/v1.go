@@ -32,6 +32,9 @@ const (
 	// Auth required
 	InventoryRoute         = "/v1/inventory/"         // Inventory records
 	SetUnvettedStatusRoute = "/v1/setunvettedstatus/" // Set unvetted status
+	ReferendumCallRoute    = "/v1/referendumcall/"    // Call a referendum
+	ReferendumVoteRoute    = "/v1/referendumvote/"    // Vote on a referendum
+	ReferendumResultsRoute = "/v1/referendumresults/" // Results from a referendum
 
 	ChallengeSize      = 32         // Size of challenge token in bytes
 	TokenSize          = 32         // Size of token
@@ -60,9 +63,13 @@ const (
 	RecordStatusNotReviewed RecordStatusT = 2 // Record has not been reviewed
 	RecordStatusCensored    RecordStatusT = 3 // Record has been censored
 	RecordStatusPublic      RecordStatusT = 4 // Record is publicly visible
+	RecordStatusNotCensored RecordStatusT = 6 // Proposal is not censored
 
 	// Public visible record that has changes that are not public
 	RecordStatusUnreviewedChanges RecordStatusT = 5
+
+	// Referendum
+	RecordStatusReferendum RecordStatusT = 7 // Proposal is under referendum
 
 	// Default network bits
 	DefaultMainnetHost = "politeia.decred.org"
@@ -101,6 +108,7 @@ var (
 		RecordStatusCensored:          "censored",
 		RecordStatusPublic:            "public",
 		RecordStatusUnreviewedChanges: "unreviewed changes",
+		RecordStatusReferendum:        "referendum",
 	}
 
 	// Input validation
@@ -351,4 +359,54 @@ type UserErrorReply struct {
 // server logs.
 type ServerErrorReply struct {
 	ErrorCode int64 `json:"code"` // Server error code
+}
+
+// Referendums
+type VoteT int
+
+const (
+	NotApprove VoteT = -1
+	NullVote   VoteT = 0
+	Approve    VoteT = 1
+
+	// Vote period in seconds
+	VotePeriod = 10
+)
+
+type ReferendumRequest struct {
+	Challenge string                       `json:"challenge"`       // Random challenge
+	Token     string                       `json:"token"`           // Censorship token
+	Signature [identity.SignatureSize]byte `json:"signature"`       // Signed token
+	User      identity.PublicIdentity      `json:"public_identity"` // User's public identity
+}
+
+type ReferendumReply struct {
+	Response string        `json:"response"` // Challenge response
+	Token    string        `json:"token"`    // Censorship token
+	Status   RecordStatusT `json:"status"`   // Proposal status
+}
+
+type ReferendumVoteRequest struct {
+	Challenge string                       `json:"challenge"`       // Random challenge
+	Token     string                       `json:"token"`           // Censorship token
+	Signature [identity.SignatureSize]byte `json:"signature"`       // Signed token
+	User      identity.PublicIdentity      `json:"public_identity"` // User's public identity
+	Vote      VoteT                        `json:"vote"`            // Type of vote
+}
+
+type ReferendumVoteReply struct {
+	Response string `json:"response"` // Challenge response
+	Status   string `json:"status"`   // Proposal status
+}
+
+type ReferendumResultsRequest struct {
+	Challenge string `json:"challenge"` // Random challenge
+	Token     string `json:"token"`     // Censorship token
+}
+
+type ReferendumResultsReply struct {
+	Response     string `json:"response"` // Challenge response
+	VotesFor     int    `json:"votes_for"`
+	VotesAgainst int    `json:"votes_against"`
+	Status       string `json:"status"` // Proposal status
 }

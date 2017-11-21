@@ -59,6 +59,7 @@ const (
 	MDStatusVetted            MDStatusT = 2 // Vetted record
 	MDStatusCensored          MDStatusT = 3 // Censored record
 	MDStatusIterationUnvetted MDStatusT = 4 // Changes are unvetted
+	MDStatusReferendum        MDStatusT = 5
 )
 
 var (
@@ -69,6 +70,7 @@ var (
 		MDStatusVetted:            "vetted",
 		MDStatusCensored:          "censored",
 		MDStatusIterationUnvetted: "iteration unvetted",
+		MDStatusReferendum:        "referendum",
 	}
 )
 
