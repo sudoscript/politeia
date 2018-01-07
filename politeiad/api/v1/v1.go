@@ -24,6 +24,7 @@ const (
 	// Routes
 	IdentityRoute             = "/v1/identity/"       // Retrieve identity
 	NewRecordRoute            = "/v1/newrecord/"      // New record
+	NewSlateRoute             = "/v1/newslate/"       // New slate
 	UpdateUnvettedRoute       = "/v1/updateunvetted/" // Update unvetted record
 	UpdateVettedMetadataRoute = "/v1/updatevettedmd/" // Update vetted metadata
 	GetUnvettedRoute          = "/v1/getunvetted/"    // Retrieve unvetted record
@@ -232,6 +233,22 @@ type NewRecord struct {
 // NewRecordReply returns the CensorshipRecord that is associated with a valid
 // record.  A valid record is not always going to be published.
 type NewRecordReply struct {
+	Response         string           `json:"response"` // Challenge response
+	CensorshipRecord CensorshipRecord `json:"censorshiprecord"`
+}
+
+// A slate is a collection of records for the purposes of an election.
+// NewSlate creates a new slate.  It includes a list of tokens that
+// correspond to records.
+type NewSlate struct {
+	Challenge string                  `json:"challenge"`       // Random challenge
+	Tokens    []string                `json:"tokens"`          // Tokens for records that are part of slate
+	User      identity.PublicIdentity `json:"public_identity"` // User submitting the slate
+}
+
+// NewSlateReply returns the CensorshipRecord that is associated with a valid
+// slate.  A slate still needs to be published.
+type NewSlateReply struct {
 	Response         string           `json:"response"` // Challenge response
 	CensorshipRecord CensorshipRecord `json:"censorshiprecord"`
 }

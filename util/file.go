@@ -92,3 +92,27 @@ func LoadFile(filename string) (mimeType string, digest string, payload string, 
 
 	return
 }
+
+// CreateFile returns the attributes of a file with a given name and content string
+func CreateFile(filename, content string) (mimeType string, digest string, payload string, err error) {
+	// Convert string of content to bytes
+	b := []byte(content)
+
+	// Payload
+	payload = base64.StdEncoding.EncodeToString(b)
+
+	// MIME
+	mimeType = http.DetectContentType(b)
+	if !mime.MimeValid(mimeType) {
+		err = mime.ErrUnsupportedMimeType
+		return
+	}
+
+	// Digest
+	h := sha256.New()
+	h.Write(b)
+	digest = hex.EncodeToString(h.Sum(nil))
+
+	return
+
+}

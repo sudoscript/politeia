@@ -445,6 +445,213 @@ func newRecord() error {
 	return nil
 }
 
+func newSlate() error {
+	flags := flag.Args()[1:] // Chop off action.
+
+	// Fish out tokens
+	tokens := make([]string, 0, len(flags))
+	for _, tokenID := range flags {
+		tokens = append(tokens, tokenID)
+	}
+
+	// Fetch remote identity
+	id, err := identity.LoadPublicIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
+	// Create New command
+	challenge, err := util.Random(v1.ChallengeSize)
+	if err != nil {
+		return err
+	}
+	n := v1.NewSlate{
+		Challenge: hex.EncodeToString(challenge),
+		Tokens:    tokens,
+		User:      *id,
+	}
+
+	// Convert Verify to JSON
+	b, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+
+	if *printJson {
+		fmt.Println(string(b))
+	}
+
+	c, err := util.NewClient(verify, *rpccert)
+	if err != nil {
+		return err
+	}
+	r, err := c.Post(*rpchost+v1.NewSlateRoute, "application/json",
+		bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		e, err := getErrorFromResponse(r)
+		if err != nil {
+			return fmt.Errorf("%v", r.Status)
+		}
+		return fmt.Errorf("%v: %v", r.Status, e)
+	}
+
+	bodyBytes := util.ConvertBodyToByteArray(r.Body, *printJson)
+
+	var reply v1.NewSlateReply
+	err = json.Unmarshal(bodyBytes, &reply)
+	if err != nil {
+		return fmt.Errorf("Could node unmarshal NewReply: %v", err)
+	}
+
+	// Verify challenge.
+	err = util.VerifyChallenge(id, challenge, reply.Response)
+	if err != nil {
+		return err
+	}
+
+	// TODO: Get each vetted record to verify merkle root
+
+	// Convert merkle, token and signature to verify reply.
+	//root, err := hex.DecodeString(reply.CensorshipRecord.Merkle)
+	//if err != nil {
+	//	return err
+	//}
+	//token, err := hex.DecodeString(reply.CensorshipRecord.Token)
+	//if err != nil {
+	//	return err
+	//}
+	//sig, err := hex.DecodeString(reply.CensorshipRecord.Signature)
+	//if err != nil {
+	//	return err
+	//}
+	//var signature [identity.SignatureSize]byte
+	//copy(signature[:], sig)
+
+	// Verify merkle root.
+	// if !bytes.Equal(merkle.Root(hashes)[:], root) {
+	// 	return fmt.Errorf("invalid merkle root")
+	// }
+
+	// Verify record token signature.
+	// merkleToken := make([]byte, len(root)+len(token))
+	// copy(merkleToken, root[:])
+	// copy(merkleToken[len(root[:]):], token)
+	// if !id.VerifyMessage(merkleToken, signature) {
+	// 	return fmt.Errorf("verification failed")
+	// }
+
+	if !*printJson {
+		printCensorshipRecord(reply.CensorshipRecord)
+	}
+
+	return nil
+}
+
+func getSlate() error {
+	flags := flag.Args()[1:] // Chop off action.
+
+	// Make sure we have the censorship token for the slate
+	if len(flags) != 1 {
+		return fmt.Errorf("must provide one and only one token")
+	}
+
+	// Validate censorship token
+	_, err := util.ConvertStringToken(flags[0])
+	if err != nil {
+		return err
+	}
+
+	// Fetch remote identity
+	id, err := identity.LoadPublicIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
+	// Create New command
+	challenge, err := util.Random(v1.ChallengeSize)
+	if err != nil {
+		return err
+	}
+	n := v1.GetUnvetted{
+		Challenge: hex.EncodeToString(challenge),
+		Token:     flags[0],
+	}
+
+	// Convert to JSON
+	b, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+
+	if *printJson {
+		fmt.Println(string(b))
+	}
+
+	c, err := util.NewClient(verify, *rpccert)
+	if err != nil {
+		return err
+	}
+	r, err := c.Post(*rpchost+v1.GetUnvettedRoute, "application/json",
+		bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		e, err := getErrorFromResponse(r)
+		if err != nil {
+			return fmt.Errorf("%v", r.Status)
+		}
+		return fmt.Errorf("%v: %v", r.Status, e)
+	}
+
+	bodyBytes := util.ConvertBodyToByteArray(r.Body, *printJson)
+
+	var reply v1.GetUnvettedReply
+	err = json.Unmarshal(bodyBytes, &reply)
+	if err != nil {
+		return fmt.Errorf("Could not unmarshal GetUnvettedReply: %v",
+			err)
+	}
+
+	// Verify challenge.
+	err = util.VerifyChallenge(id, challenge, reply.Response)
+	if err != nil {
+		return err
+	}
+
+	// Verify status
+	if reply.Record.Status == v1.RecordStatusInvalid ||
+		reply.Record.Status == v1.RecordStatusNotFound {
+		// Pretty print record
+		status, ok := v1.RecordStatus[reply.Record.Status]
+		if !ok {
+			status = v1.RecordStatus[v1.RecordStatusInvalid]
+		}
+		fmt.Printf("Record       : %v\n", flags[0])
+		fmt.Printf("  Status     : %v\n", status)
+		return nil
+	}
+
+	// Verify content
+	err = v1.Verify(*id, reply.Record.CensorshipRecord,
+		reply.Record.Files)
+	if err != nil {
+		return err
+	}
+
+	if !*printJson {
+		printRecordRecord("Unvetted record", reply.Record)
+	}
+	return nil
+}
+
 func updateRecord() error {
 	flags := flag.Args()[1:] // Chop off action.
 
@@ -1033,6 +1240,10 @@ func _main() error {
 				return setUnvettedStatus()
 			case "update":
 				return updateRecord()
+			case "newslate":
+				return newSlate()
+			case "getslate":
+				return getSlate()
 			default:
 				return fmt.Errorf("invalid action: %v", a)
 			}

@@ -249,6 +249,112 @@ func (p *politeia) newRecord(w http.ResponseWriter, r *http.Request) {
 	util.RespondWithJSON(w, http.StatusOK, reply)
 }
 
+func (p *politeia) newSlate(w http.ResponseWriter, r *http.Request) {
+	var t v1.NewSlate
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&t); err != nil {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+		return
+	}
+	defer r.Body.Close()
+
+	challenge, err := hex.DecodeString(t.Challenge)
+	if err != nil || len(challenge) != v1.ChallengeSize {
+		log.Errorf("%v newRecord: invalid challenge", remoteAddr(r))
+		p.respondWithUserError(w, v1.ErrorStatusInvalidChallenge, nil)
+		return
+	}
+
+	log.Infof("New slate submitted %v", remoteAddr(r))
+
+	// Look up each of the records associated with each token
+	// to make sure they exist and are vetted
+	for _, tokenStr := range t.Tokens {
+		// Validate token
+		token, err := util.ConvertStringToken(tokenStr)
+		if err != nil {
+			p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+			return
+		}
+
+		// Ask backend about the censorship token.
+		_, err = p.backend.GetVetted(token)
+		if err == backend.ErrRecordNotFound {
+			log.Errorf("Get vetted record %v: token %v not found",
+				remoteAddr(r), tokenStr)
+			p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+			return
+		} else if err != nil {
+			// Generic internal error.
+			errorCode := time.Now().Unix()
+			log.Errorf("%v Get vetted record error code %v: %v",
+				remoteAddr(r), errorCode, err)
+			p.respondWithServerError(w, errorCode)
+			return
+		}
+	}
+
+	// Convert component records into files to get added
+	filesAdd := make([]backend.File, 0, len(t.Tokens))
+	for _, recordToken := range t.Tokens {
+		// Use token for both filename and payload, to be merklized later
+		mime, digest, payload, err := util.CreateFile(recordToken, recordToken)
+		if err != nil {
+			errorCode := time.Now().Unix()
+			log.Errorf("%v Could not create file from record %v @ %v: %v",
+				remoteAddr(r), recordToken, errorCode, err)
+			p.respondWithServerError(w, errorCode)
+			return
+		}
+		filesAdd = append(filesAdd, backend.File{
+			Name:    recordToken,
+			MIME:    mime,
+			Digest:  digest,
+			Payload: payload,
+		})
+	}
+
+	rm, err := p.backend.New(nil, filesAdd)
+	if err != nil {
+		// Check for content error.
+		if contentErr, ok := err.(backend.ContentVerificationError); ok {
+			log.Errorf("%v New record content error: %v",
+				remoteAddr(r), contentErr)
+			p.respondWithUserError(w, contentErr.ErrorCode,
+				contentErr.ErrorContext)
+			return
+		}
+
+		// Generic internal error.
+		errorCode := time.Now().Unix()
+		log.Errorf("%v New record error code %v: %v", remoteAddr(r),
+			errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+
+	// Prepare reply.
+	merkleToken := make([]byte, len(rm.Merkle)+len(rm.Token))
+	copy(merkleToken, rm.Merkle[:])
+	copy(merkleToken[len(rm.Merkle[:]):], rm.Token)
+	signature := p.identity.SignMessage(merkleToken)
+
+	response := p.identity.SignMessage(challenge)
+	reply := v1.NewRecordReply{
+		Response: hex.EncodeToString(response[:]),
+		CensorshipRecord: v1.CensorshipRecord{
+			Merkle:    hex.EncodeToString(rm.Merkle[:]),
+			Token:     hex.EncodeToString(rm.Token),
+			Signature: hex.EncodeToString(signature[:]),
+		},
+	}
+
+	log.Infof("New record accepted %v: token %v", remoteAddr(r),
+		reply.CensorshipRecord.Token)
+
+	util.RespondWithJSON(w, http.StatusOK, reply)
+}
+
 func (p *politeia) updateUnvetted(w http.ResponseWriter, r *http.Request) {
 	var t v1.UpdateUnvetted
 	decoder := json.NewDecoder(r.Body)
@@ -787,6 +893,8 @@ func _main() error {
 		logging(p.getIdentity)).Methods("POST")
 	p.router.HandleFunc(v1.NewRecordRoute,
 		logging(p.newRecord)).Methods("POST")
+	p.router.HandleFunc(v1.NewSlateRoute,
+		logging(p.newSlate)).Methods("POST")
 	p.router.HandleFunc(v1.UpdateUnvettedRoute,
 		logging(p.updateUnvetted)).Methods("POST")
 	p.router.HandleFunc(v1.GetUnvettedRoute,
