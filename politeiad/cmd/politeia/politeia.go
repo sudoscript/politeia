@@ -577,7 +577,7 @@ func getSlate() error {
 	if err != nil {
 		return err
 	}
-	n := v1.GetUnvetted{
+	n := v1.GetSlate{
 		Challenge: hex.EncodeToString(challenge),
 		Token:     flags[0],
 	}
@@ -596,7 +596,7 @@ func getSlate() error {
 	if err != nil {
 		return err
 	}
-	r, err := c.Post(*rpchost+v1.GetUnvettedRoute, "application/json",
+	r, err := c.Post(*rpchost+v1.GetSlateRoute, "application/json",
 		bytes.NewReader(b))
 	if err != nil {
 		return err
@@ -613,10 +613,10 @@ func getSlate() error {
 
 	bodyBytes := util.ConvertBodyToByteArray(r.Body, *printJson)
 
-	var reply v1.GetUnvettedReply
+	var reply v1.GetSlateReply
 	err = json.Unmarshal(bodyBytes, &reply)
 	if err != nil {
-		return fmt.Errorf("Could not unmarshal GetUnvettedReply: %v",
+		return fmt.Errorf("Could not unmarshal GetSlateReply: %v",
 			err)
 	}
 
@@ -626,29 +626,37 @@ func getSlate() error {
 		return err
 	}
 
-	// Verify status
-	if reply.Record.Status == v1.RecordStatusInvalid ||
-		reply.Record.Status == v1.RecordStatusNotFound {
-		// Pretty print record
-		status, ok := v1.RecordStatus[reply.Record.Status]
-		if !ok {
-			status = v1.RecordStatus[v1.RecordStatusInvalid]
-		}
-		fmt.Printf("Record       : %v\n", flags[0])
-		fmt.Printf("  Status     : %v\n", status)
-		return nil
-	}
-
-	// Verify content
-	err = v1.Verify(*id, reply.Record.CensorshipRecord,
-		reply.Record.Files)
-	if err != nil {
-		return err
-	}
-
 	if !*printJson {
-		printRecordRecord("Unvetted record", reply.Record)
+		fmt.Println("Electoral Slate")
+		printCensorshipRecord(reply.CensorshipRecord)
 	}
+	for i, record := range reply.Records {
+		// Verify status
+		if record.Status == v1.RecordStatusInvalid ||
+			record.Status == v1.RecordStatusNotFound {
+			// Pretty print record
+			status, ok := v1.RecordStatus[record.Status]
+			if !ok {
+				status = v1.RecordStatus[v1.RecordStatusInvalid]
+			}
+			fmt.Printf("Record       : %v\n", flags[0])
+			fmt.Printf("  Status     : %v\n", status)
+			return nil
+		}
+
+		// Verify content
+		err = v1.Verify(*id, record.CensorshipRecord,
+			record.Files)
+		if err != nil {
+			return err
+		}
+
+		if !*printJson {
+			printRecordRecord(fmt.Sprintf("\nElectoral promise %02d", i),
+				record)
+		}
+	}
+
 	return nil
 }
 

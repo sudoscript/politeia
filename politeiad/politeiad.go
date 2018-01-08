@@ -7,6 +7,7 @@ package main
 import (
 	"crypto/elliptic"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -560,6 +561,129 @@ func (p *politeia) getVetted(w http.ResponseWriter, r *http.Request) {
 	util.RespondWithJSON(w, http.StatusOK, reply)
 }
 
+func (p *politeia) getSlate(w http.ResponseWriter, r *http.Request) {
+	var t v1.GetSlate
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&t); err != nil {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+		return
+	}
+	defer r.Body.Close()
+
+	challenge, err := hex.DecodeString(t.Challenge)
+	if err != nil || len(challenge) != v1.ChallengeSize {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidChallenge, nil)
+		return
+	}
+	response := p.identity.SignMessage(challenge)
+
+	reply := v1.GetSlateReply{
+		Response: hex.EncodeToString(response[:]),
+	}
+
+	// Validate token
+	token, err := util.ConvertStringToken(t.Token)
+	if err != nil {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+		return
+	}
+
+	var slateRecord *backend.Record
+	// First look in unvetted repo
+	slateRecord, err = p.backend.GetUnvetted(token)
+	// If not found, look in vetted repo
+	if err == backend.ErrRecordNotFound {
+		slateRecord, err = p.backend.GetVetted(token)
+	}
+	// Otherwise handle errors
+	if err == backend.ErrRecordNotFound {
+		log.Errorf("Get slate %v: slate %v not found in either vetted or unvetted repos",
+			remoteAddr(r), t.Token)
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+		return
+	} else if err != nil {
+		// Generic internal error.
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Get unvetted record error code %v: %v",
+			remoteAddr(r), errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+
+	// Append censorship record to the reply
+	rm := slateRecord.RecordMetadata
+	merkleToken := make([]byte, len(rm.Merkle)+len(rm.Token))
+	copy(merkleToken, rm.Merkle[:])
+	copy(merkleToken[len(rm.Merkle[:]):], rm.Token)
+	signature := p.identity.SignMessage(merkleToken)
+
+	reply.CensorshipRecord = v1.CensorshipRecord{
+		Merkle:    hex.EncodeToString(rm.Merkle[:]),
+		Token:     hex.EncodeToString(rm.Token),
+		Signature: hex.EncodeToString(signature[:]),
+	}
+
+	// Get each of the records from the backend
+	// The files in the slate record have tokens as their payloads.
+	records := make([]v1.Record, 0, len(slateRecord.Files))
+	for _, file := range slateRecord.Files {
+
+		payloadBytes, err := base64.StdEncoding.DecodeString(file.Payload)
+		if err != nil {
+			errorCode := time.Now().Unix()
+			log.Errorf("%v Could not convert payload %v to bytes %v: %v",
+				remoteAddr(r), file.Payload, errorCode, err)
+			p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+			return
+		}
+
+		token, err := util.ConvertStringToken(string(payloadBytes))
+		if err != nil {
+			errorCode := time.Now().Unix()
+			log.Errorf("%v Could not convert token %v to bytes %v: %v",
+				remoteAddr(r), file.Payload, errorCode, err)
+			p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+			return
+		}
+
+		record, err := p.backend.GetVetted(token)
+		if err == backend.ErrRecordNotFound {
+			errorCode := time.Now().Unix()
+			log.Errorf("Get component record %v: token %v not found",
+				remoteAddr(r), token)
+			p.respondWithServerError(w, errorCode)
+		} else if err != nil {
+			// Generic internal error.
+			errorCode := time.Now().Unix()
+			log.Errorf("%v Get vetted record error code %v: %v",
+				remoteAddr(r), errorCode, err)
+			p.respondWithServerError(w, errorCode)
+			return
+		}
+
+		frontEndRecord := p.convertBackendRecord(*record)
+
+		// Double check record bits before adding them
+		err = v1.Verify(p.identity.Public,
+			frontEndRecord.CensorshipRecord, frontEndRecord.Files)
+		if err != nil {
+			// Generic internal error.
+			errorCode := time.Now().Unix()
+			log.Errorf("%v Get vetted record CORRUPTION "+
+				"error code %v: %v", remoteAddr(r), errorCode,
+				err)
+
+			p.respondWithServerError(w, errorCode)
+			return
+		}
+		records = append(records, frontEndRecord)
+	}
+
+	reply.Records = records
+
+	util.RespondWithJSON(w, http.StatusOK, reply)
+}
+
 func (p *politeia) inventory(w http.ResponseWriter, r *http.Request) {
 	var i v1.Inventory
 	decoder := json.NewDecoder(r.Body)
@@ -901,6 +1025,8 @@ func _main() error {
 		logging(p.getUnvetted)).Methods("POST")
 	p.router.HandleFunc(v1.GetVettedRoute,
 		logging(p.getVetted)).Methods("POST")
+	p.router.HandleFunc(v1.GetSlateRoute,
+		logging(p.getSlate)).Methods("POST")
 
 	// Routes that require auth
 	p.router.HandleFunc(v1.InventoryRoute,

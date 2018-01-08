@@ -29,6 +29,7 @@ const (
 	UpdateVettedMetadataRoute = "/v1/updatevettedmd/" // Update vetted metadata
 	GetUnvettedRoute          = "/v1/getunvetted/"    // Retrieve unvetted record
 	GetVettedRoute            = "/v1/getvetted/"      // Retrieve vetted record
+	GetSlateRoute             = "/v1/getslate/"       // Retrieve slate
 
 	// Auth required
 	InventoryRoute         = "/v1/inventory/"         // Inventory records
@@ -251,6 +252,17 @@ type NewSlate struct {
 type NewSlateReply struct {
 	Response         string           `json:"response"` // Challenge response
 	CensorshipRecord CensorshipRecord `json:"censorshiprecord"`
+}
+
+type GetSlate struct {
+	Challenge string `json:"challenge"` // Random challenge
+	Token     string `json:"token"`     // Censorship token
+}
+
+type GetSlateReply struct {
+	Response         string           `json:"response"`    // Challenge response
+	CensorshipRecord CensorshipRecord `json:"slaterecord"` // Censorship record of slate
+	Records          []Record         `json:"records"`     // Records associated with the slate
 }
 
 // GetUnvetted requests an unvetted record from the server.
