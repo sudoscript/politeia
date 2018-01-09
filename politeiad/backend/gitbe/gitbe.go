@@ -274,17 +274,6 @@ func verifyContent(metadata []backend.MetadataStream, files []backend.File, file
 				}
 			}
 		}
-		// Check against filesDel
-		for _, v := range filesDel {
-			if files[i].Name == v {
-				return nil, backend.ContentVerificationError{
-					ErrorCode: pd.ErrorStatusDuplicateFilename,
-					ErrorContext: []string{
-						files[i].Name,
-					},
-				}
-			}
-		}
 	}
 
 	fa := make([]file, 0, len(files))
@@ -1452,9 +1441,17 @@ func (g *gitBackEnd) updateRecord(token []byte, mdAppend, mdOverwrite []backend.
 }
 
 func (g *gitBackEnd) UpdateUnvettedRecord(token []byte, mdAppend []backend.MetadataStream, mdOverwrite []backend.MetadataStream, filesAdd []backend.File, filesDel []string) (*backend.RecordMetadata, error) {
+	// Get the record to make sure that new files are not duplicates of existing ones
+	record, err := g.GetUnvetted(token)
+	if err != nil {
+		return nil, err
+	}
+	allFiles := filesAdd
+	allFiles = append(allFiles, record.Files...)
+
 	// Send in a single metadata array to verify there are no dups.
 	allMD := append(mdAppend, mdOverwrite...)
-	fa, err := verifyContent(allMD, filesAdd, filesDel)
+	fa, err := verifyContent(allMD, allFiles, filesDel)
 	if err != nil {
 		e, ok := err.(backend.ContentVerificationError)
 		if !ok {
