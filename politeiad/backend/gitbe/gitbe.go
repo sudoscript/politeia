@@ -1418,6 +1418,13 @@ func (g *gitBackEnd) updateRecord(token []byte, mdAppend, mdOverwrite []backend.
 		hashes = append(hashes, &d)
 	}
 
+	// Update record metadata
+	brmNew, err := createMD(g.unvetted, id,
+		backend.MDStatusIterationUnvetted, brm.Version+1, hashes, token)
+	if err != nil {
+		return nil, err
+	}
+
 	// If there are no changes DO NOT update the record and reply with no
 	// changes.
 	o, err := g.gitDiff(g.unvetted)
@@ -1426,13 +1433,6 @@ func (g *gitBackEnd) updateRecord(token []byte, mdAppend, mdOverwrite []backend.
 	}
 	if len(o) == 0 {
 		return nil, backend.ErrNoChanges
-	}
-
-	// Update record metadata
-	brmNew, err := createMD(g.unvetted, id,
-		backend.MDStatusIterationUnvetted, brm.Version+1, hashes, token)
-	if err != nil {
-		return nil, err
 	}
 
 	// git add id/recordmetadata.json
