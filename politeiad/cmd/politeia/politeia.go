@@ -660,6 +660,142 @@ func getSlate() error {
 	return nil
 }
 
+func updateSlate() error {
+	flags := flag.Args()[1:] // Chop off action.
+
+	if len(flags) < 2 {
+		fmt.Errorf("Need to provide censorship token of the slate and at least one action. Only %v actions provided", len(flags))
+	}
+
+	// Create New command
+	challenge, err := util.Random(v1.ChallengeSize)
+	if err != nil {
+		return err
+	}
+	n := v1.UpdateSlate{
+		Challenge: hex.EncodeToString(challenge),
+	}
+
+	// Validate censorship token for slate
+	slateToken := flags[0]
+	_, err = util.ConvertStringToken(slateToken)
+	if err != nil {
+		return err
+	}
+	n.Token = slateToken
+
+	// Extract and validate records to add/remove
+	for _, v := range flags[1:] {
+		switch {
+		case regexFileAdd.MatchString(v):
+			s := regexFileAdd.FindString(v)
+			recordToken := v[len(s):]
+			_, err := util.ConvertStringToken(recordToken)
+			if err != nil {
+				return err
+			}
+			n.RecordsAdd = append(n.RecordsAdd, recordToken)
+
+		case regexFileDel.MatchString(v):
+			s := regexFileDel.FindString(v)
+			recordToken := v[len(s):]
+			_, err := util.ConvertStringToken(recordToken)
+			if err != nil {
+				return err
+			}
+			n.RecordsDel = append(n.RecordsDel, recordToken)
+
+		default:
+			return fmt.Errorf("Add a record with 'add:' or delete with 'del:'. Unknown action %v", v)
+		}
+	}
+
+	// Fetch remote identity
+	id, err := identity.LoadPublicIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
+	// Convert Verify to JSON
+	b, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+
+	if *printJson {
+		fmt.Println(string(b))
+	}
+
+	c, err := util.NewClient(verify, *rpccert)
+	if err != nil {
+		return err
+	}
+	r, err := c.Post(*rpchost+v1.UpdateSlateRoute, "application/json",
+		bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != http.StatusOK {
+		e, err := getErrorFromResponse(r)
+		if err != nil {
+			return fmt.Errorf("%v", r.Status)
+		}
+		return fmt.Errorf("%v: %v", r.Status, e)
+	}
+
+	bodyBytes := util.ConvertBodyToByteArray(r.Body, *printJson)
+
+	var reply v1.UpdateSlateReply
+	err = json.Unmarshal(bodyBytes, &reply)
+	if err != nil {
+		return fmt.Errorf("Could node unmarshal UpdateReply: %v", err)
+	}
+
+	// Verify challenge.
+	err = util.VerifyChallenge(id, challenge, reply.Response)
+	if err != nil {
+		return err
+	}
+
+	// Convert merkle, token and signature to verify reply.
+	root, err := hex.DecodeString(reply.CensorshipRecord.Merkle)
+	if err != nil {
+		return err
+	}
+	token, err := hex.DecodeString(reply.CensorshipRecord.Token)
+	if err != nil {
+		return err
+	}
+	sig, err := hex.DecodeString(reply.CensorshipRecord.Signature)
+	if err != nil {
+		return err
+	}
+	var signature [identity.SignatureSize]byte
+	copy(signature[:], sig)
+
+	// XXX Verify merkle root.
+	//hashes := make([]*[sha256.Size]byte, 0, len(flags[1:]))
+	//if !bytes.Equal(merkle.Root(hashes)[:], root) {
+	//	return fmt.Errorf("invalid merkle root")
+	//}
+
+	// Verify record token signature.
+	merkleToken := make([]byte, len(root)+len(token))
+	copy(merkleToken, root[:])
+	copy(merkleToken[len(root[:]):], token)
+	if !id.VerifyMessage(merkleToken, signature) {
+		return fmt.Errorf("verification failed")
+	}
+
+	if !*printJson {
+		printCensorshipRecord(reply.CensorshipRecord)
+	}
+
+	return nil
+}
+
 func updateRecord() error {
 	flags := flag.Args()[1:] // Chop off action.
 
@@ -1252,6 +1388,8 @@ func _main() error {
 				return newSlate()
 			case "getslate":
 				return getSlate()
+			case "updateslate":
+				return updateSlate()
 			default:
 				return fmt.Errorf("invalid action: %v", a)
 			}
