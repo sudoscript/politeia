@@ -39,11 +39,14 @@ var (
 	regexFileDel     = regexp.MustCompile(`^del:`)
 	regexToken       = regexp.MustCompile(`^token:`)
 
-	defaultHomeDir          = dcrutil.AppDataDir("politeia", false)
-	defaultIdentityFilename = "identity.json"
+	defaultHomeDir              = dcrutil.AppDataDir("politeia", false)
+	defaultIdentityFilename     = "identity.json"
+	defaultUserIdentityFilename = "user.json"
 
 	identityFilename = flag.String("id", filepath.Join(defaultHomeDir,
 		defaultIdentityFilename), "remote server identity file")
+	userIdentityFilename = flag.String("user", filepath.Join(defaultHomeDir,
+		defaultUserIdentityFilename), "user's identity file")
 	testnet     = flag.Bool("testnet", false, "Use testnet port")
 	printJson   = flag.Bool("json", false, "Print JSON")
 	verbose     = flag.Bool("v", false, "Verbose")
@@ -168,6 +171,31 @@ func getIdentity() error {
 	fmt.Printf("Identity saved to: %v\n", rf)
 
 	return nil
+}
+
+func getUserIdentity() (*identity.FullIdentity, error) {
+	// Create a local identity file if one does not exist
+	filename := *userIdentityFilename
+	fmt.Println("filename", filename)
+	if !util.FileExists(filename) {
+		fmt.Println("No identity file found. Creating new identity.")
+		fullIdentity, err := identity.New()
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("Saving identity to %v\n", filename)
+		fullIdentity.Save(filename)
+	} else {
+		fmt.Println("Identity file found.")
+	}
+
+	// Try to load identity
+	userFullId, err := identity.LoadFullIdentity(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	return userFullId, nil
 }
 
 func printCensorshipRecord(c v1.CensorshipRecord) {
@@ -959,14 +987,20 @@ func callReferendum() error {
 	}
 	tokenStr := flags[0]
 
+	// Fetch remote identity
+	serverId, err := identity.LoadPublicIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
 	// Validate censorship token
 	tokenBytes, err := util.ConvertStringToken(tokenStr)
 	if err != nil {
 		return err
 	}
 
-	// Fetch full identity to sign token
-	fullId, err := identity.LoadFullIdentity(*identityFilename)
+	// Fetch user's identity to sign token
+	fullId, err := getUserIdentity()
 	if err != nil {
 		return err
 	}
@@ -979,16 +1013,13 @@ func callReferendum() error {
 	signedToken := fullId.SignMessage(tokenBytes)
 
 	// Only send public ID to server to ensure 1 user, 1 vote
-	publicId, err := identity.LoadPublicIdentity(*identityFilename)
-	if err != nil {
-		return err
-	}
+	publicId := fullId.Public
 
 	req := v1.ReferendumRequest{
 		Challenge: hex.EncodeToString(challenge),
 		Token:     tokenStr,
 		Signature: signedToken,
-		User:      *publicId,
+		User:      publicId,
 	}
 
 	// Convert to JSON
@@ -1030,11 +1061,10 @@ func callReferendum() error {
 	}
 
 	// Verify challenge.
-	// NOT WORKING
-	// err = util.VerifyChallenge(&publicId, challenge, reply.Response)
-	// if err != nil {
-	// 	return err
-	// }
+	err = util.VerifyChallenge(serverId, challenge, reply.Response)
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("Referendum initiated on proposal: %v\n", flags[0])
 
@@ -1052,14 +1082,20 @@ func voteOnReferendum() error {
 	voteStr := flags[0]
 	tokenStr := flags[1]
 
+	// Fetch remote identity
+	serverId, err := identity.LoadPublicIdentity(*identityFilename)
+	if err != nil {
+		return err
+	}
+
 	// Validate censorship token
 	tokenBytes, err := util.ConvertStringToken(tokenStr)
 	if err != nil {
 		return err
 	}
 
-	// Fetch full identity to sign token
-	fullId, err := identity.LoadFullIdentity(*identityFilename)
+	// Fetch user's identity to sign token
+	fullId, err := getUserIdentity()
 	if err != nil {
 		return err
 	}
@@ -1083,17 +1119,14 @@ func voteOnReferendum() error {
 	}
 
 	// Only send public ID to server to ensure 1 user, 1 vote
-	publicId, err := identity.LoadPublicIdentity(*identityFilename)
-	if err != nil {
-		return err
-	}
+	publicId := fullId.Public
 
 	// Create command
 	req := v1.ReferendumVoteRequest{
 		Challenge: hex.EncodeToString(challenge),
 		Token:     tokenStr,
 		Signature: signedToken,
-		User:      *publicId,
+		User:      publicId,
 		Vote:      voteChoice,
 	}
 
@@ -1136,11 +1169,10 @@ func voteOnReferendum() error {
 	}
 
 	// Verify challenge.
-	// NOT WORKING
-	// err = util.VerifyChallenge(&publicId, challenge, reply.Response)
-	// if err != nil {
-	// 	return err
-	// }
+	err = util.VerifyChallenge(serverId, challenge, reply.Response)
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("Voted on referendum. Current status: %v\n", reply.Status)
 

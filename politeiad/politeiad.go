@@ -490,11 +490,10 @@ func (p *politeia) referendumCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate user's signature on token
-	// NOT WORKING
-	// if !t.User.VerifyMessage(token, t.Signature) {
-	// 	p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Invalid user signature"})
-	// 	return
-	// }
+	if !t.User.VerifyMessage(token, t.Signature) {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Invalid user signature"})
+		return
+	}
 
 	// Ask backend about the censorship token.
 	bpr, err := p.backend.GetUnvetted(token)
@@ -502,7 +501,7 @@ func (p *politeia) referendumCall(w http.ResponseWriter, r *http.Request) {
 		reply.Status = v1.RecordStatusNotFound
 		log.Errorf("Get unvetted proposal %v: token %v not found",
 			remoteAddr(r), t.Token)
-		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Proposal not found. Are you sure it hasn't been published?"})
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Proposal not found. Are you sure it has been censored?"})
 		return
 	}
 	if err != nil {
@@ -580,16 +579,25 @@ func (p *politeia) referendumVote(w http.ResponseWriter, r *http.Request) {
 		Response: hex.EncodeToString(response[:]),
 	}
 
+	// Validate token
+	token, err := util.ConvertStringToken(t.Token)
+	if err != nil {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Invalid Token"})
+		return
+	}
+
 	// Validate user's signature on token
-	// NOT WORKING
-	// if !t.User.VerifyMessage(token, t.Signature) {
-	// 	p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Invalid user signature"})
-	// 	return
-	// }
+	if !t.User.VerifyMessage(token, t.Signature) {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Invalid user signature"})
+		return
+	}
 
 	// Find token in AllReferendums
-	ref := referendum.AllReferendums[t.Token]
-	// TODO: What if token not found in referendums?
+	ref, found := referendum.AllReferendums[t.Token]
+	if !found {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Token does not correspond to a referendum"})
+		return
+	}
 
 	// Register the vote
 	vote := referendum.Vote{
@@ -600,10 +608,7 @@ func (p *politeia) referendumVote(w http.ResponseWriter, r *http.Request) {
 
 	err = ref.CastVote(vote)
 	if err != nil {
-		errorCode := time.Now().Unix()
-		log.Errorf("%v Unable to cast vote %v: %v",
-			remoteAddr(r), errorCode, err)
-		p.respondWithServerError(w, errorCode)
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{err.Error()})
 		return
 	}
 
