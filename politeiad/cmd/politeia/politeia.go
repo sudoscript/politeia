@@ -121,7 +121,7 @@ func getErrorFromResponse(r *http.Response) (string, error) {
 		if err := decoder.Decode(&e); err != nil {
 			return "", err
 		}
-		errMsg = v1.ErrorStatus[e.ErrorCode] + " "
+		errMsg = v1.ErrorStatus[e.ErrorCode] + ": "
 		if e.ErrorContext != nil && len(e.ErrorContext) > 0 {
 			errMsg += strings.Join(e.ErrorContext, ", ")
 		}

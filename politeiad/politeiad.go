@@ -515,8 +515,11 @@ func (p *politeia) updateSlate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if userKey != t.User.String() {
-		log.Errorf("User is not the owner on record.")
-		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+		log.Errorf("User submitting changes is not the owner on record.")
+		errContext := []string{
+			"User is not the owner on record for this slate.",
+		}
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, errContext)
 		return
 	}
 
