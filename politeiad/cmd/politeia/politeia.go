@@ -39,11 +39,14 @@ var (
 	regexFileDel     = regexp.MustCompile(`^del:`)
 	regexToken       = regexp.MustCompile(`^token:`)
 
-	defaultHomeDir          = dcrutil.AppDataDir("politeia", false)
-	defaultIdentityFilename = "identity.json"
+	defaultHomeDir              = dcrutil.AppDataDir("politeia", false)
+	defaultIdentityFilename     = "identity.json"
+	defaultUserIdentityFilename = "user.json"
 
 	identityFilename = flag.String("-id", filepath.Join(defaultHomeDir,
 		defaultIdentityFilename), "remote server identity file")
+	userIdentityFilename = flag.String("user", filepath.Join(defaultHomeDir,
+		defaultUserIdentityFilename), "user's identity file")
 	testnet     = flag.Bool("testnet", false, "Use testnet port")
 	printJson   = flag.Bool("json", false, "Print JSON")
 	verbose     = flag.Bool("v", false, "Verbose")
@@ -168,6 +171,30 @@ func getIdentity() error {
 	fmt.Printf("Identity saved to: %v\n", rf)
 
 	return nil
+}
+
+func getUserIdentity() (*identity.FullIdentity, error) {
+	// Create a local identity file if one does not exist
+	filename := *userIdentityFilename
+	if !util.FileExists(filename) {
+		fmt.Println("No identity file found. Creating new identity.")
+		fullIdentity, err := identity.New()
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("Saving identity to %v\n", filename)
+		fullIdentity.Save(filename)
+	} else {
+		fmt.Println("Identity file found.")
+	}
+
+	// Try to load identity
+	userFullId, err := identity.LoadFullIdentity(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	return userFullId, nil
 }
 
 func printCensorshipRecord(c v1.CensorshipRecord) {
@@ -460,15 +487,27 @@ func newSlate() error {
 		return err
 	}
 
+	// Get user identity
+	userId, err := getUserIdentity()
+	if err != nil {
+		return err
+	}
+
 	// Create New command
 	challenge, err := util.Random(v1.ChallengeSize)
+	if err != nil {
+		return err
+	}
+	// Sign the first token to prove identity
+	firstToken, err := util.ConvertStringToken(tokens[0])
 	if err != nil {
 		return err
 	}
 	n := v1.NewSlate{
 		Challenge: hex.EncodeToString(challenge),
 		Tokens:    tokens,
-		User:      *id,
+		User:      userId.Public,
+		Signature: userId.SignMessage(firstToken),
 	}
 
 	// Convert Verify to JSON
@@ -628,6 +667,7 @@ func getSlate() error {
 
 	if !*printJson {
 		fmt.Println("Electoral Slate")
+		fmt.Printf("Owner's Public Key: %v\n", reply.Owner.String())
 		printCensorshipRecord(reply.CensorshipRecord)
 	}
 	for i, record := range reply.Records {
@@ -667,6 +707,19 @@ func updateSlate() error {
 		fmt.Errorf("Need to provide censorship token of the slate and at least one action. Only %v actions provided", len(flags))
 	}
 
+	// Get user identity
+	userId, err := getUserIdentity()
+	if err != nil {
+		return err
+	}
+
+	// Validate censorship token for slate
+	slateToken := flags[0]
+	slateTokenBytes, err := util.ConvertStringToken(slateToken)
+	if err != nil {
+		return err
+	}
+
 	// Create New command
 	challenge, err := util.Random(v1.ChallengeSize)
 	if err != nil {
@@ -674,15 +727,10 @@ func updateSlate() error {
 	}
 	n := v1.UpdateSlate{
 		Challenge: hex.EncodeToString(challenge),
+		User:      userId.Public,
+		Token:     slateToken,
+		Signature: userId.SignMessage(slateTokenBytes),
 	}
-
-	// Validate censorship token for slate
-	slateToken := flags[0]
-	_, err = util.ConvertStringToken(slateToken)
-	if err != nil {
-		return err
-	}
-	n.Token = slateToken
 
 	// Extract and validate records to add/remove
 	for _, v := range flags[1:] {
@@ -1390,6 +1438,9 @@ func _main() error {
 				return getSlate()
 			case "updateslate":
 				return updateSlate()
+			case "createuser":
+				_, err := getUserIdentity()
+				return err
 			default:
 				return fmt.Errorf("invalid action: %v", a)
 			}

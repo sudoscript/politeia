@@ -114,5 +114,14 @@ func CreateFile(filename, content string) (mimeType string, digest string, paylo
 	digest = hex.EncodeToString(h.Sum(nil))
 
 	return
+}
 
+// filesExists reports whether the named file or directory exists.
+func FileExists(name string) bool {
+	if _, err := os.Stat(name); err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+	}
+	return true
 }

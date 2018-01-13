@@ -74,6 +74,9 @@ const (
 	DefaultTestnetPort = "59374"
 
 	Forward = "X-Forwarded-For"
+
+	// MetatdataStream ID for slate owners
+	SlateOwnerMDID = 0
 )
 
 var (
@@ -243,9 +246,10 @@ type NewRecordReply struct {
 // NewSlate creates a new slate.  It includes a list of tokens that
 // correspond to records.
 type NewSlate struct {
-	Challenge string                  `json:"challenge"`       // Random challenge
-	Tokens    []string                `json:"tokens"`          // Tokens for records that are part of slate
-	User      identity.PublicIdentity `json:"public_identity"` // User submitting the slate
+	Challenge string                       `json:"challenge"`       // Random challenge
+	User      identity.PublicIdentity      `json:"public_identity"` // User submitting the slate
+	Signature [identity.SignatureSize]byte `json:"signature"`       // Sign the first token to prove identity
+	Tokens    []string                     `json:"tokens"`          // Tokens for records that are part of slate
 }
 
 // NewSlateReply returns the CensorshipRecord that is associated with a valid
@@ -261,17 +265,20 @@ type GetSlate struct {
 }
 
 type GetSlateReply struct {
-	Response         string           `json:"response"`    // Challenge response
-	CensorshipRecord CensorshipRecord `json:"slaterecord"` // Censorship record of slate
-	Records          []Record         `json:"records"`     // Records associated with the slate
+	Response         string                  `json:"response"`    // Challenge response
+	CensorshipRecord CensorshipRecord        `json:"slaterecord"` // Censorship record of slate
+	Owner            identity.PublicIdentity `json:"owner"`       // Public key of the slate owner
+	Records          []Record                `json:"records"`     // Records associated with the slate
 }
 
 // UpdateSlate updates an unvetted slate.
 type UpdateSlate struct {
-	Challenge  string   `json:"challenge"`  // Random challenge
-	Token      string   `json:"token"`      // Censorship token for the slate
-	RecordsDel []string `json:"recordsdel"` // Files that will be deleted
-	RecordsAdd []string `json:"recordsadd"` // Files that are modified or added
+	Challenge  string                       `json:"challenge"`       // Random challenge
+	User       identity.PublicIdentity      `json:"public_identity"` // User submitting the slate
+	Signature  [identity.SignatureSize]byte `json:"signature"`       // Signed censorship token
+	Token      string                       `json:"token"`           // Censorship token for the slate
+	RecordsDel []string                     `json:"recordsdel"`      // Files that will be deleted
+	RecordsAdd []string                     `json:"recordsadd"`      // Files that are modified or added
 }
 
 type UpdateSlateReply struct {

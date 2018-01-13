@@ -266,56 +266,72 @@ func (p *politeia) newSlate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check signature to make sure user is who they say they are
+	firstToken, err := util.ConvertStringToken(t.Tokens[0])
+	if err != nil {
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Could not convert token string to bytes %v @ %v: %v",
+			remoteAddr(r), firstToken, errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+	if !t.User.VerifyMessage(firstToken, t.Signature) {
+		errorStr := "User does not match signature."
+		log.Errorf(errorStr)
+		errContext := []string{errorStr}
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, errContext)
+		return
+	}
+
 	log.Infof("New slate submitted %v", remoteAddr(r))
 
+	// Convert component records into files to get added
 	// Look up each of the records associated with each token
 	// to make sure they exist and are vetted
+	filesAdd := make([]backend.File, 0, len(t.Tokens))
 	for _, tokenStr := range t.Tokens {
 		// Validate token
-		token, err := util.ConvertStringToken(tokenStr)
+		tokenBytes, err := util.ConvertStringToken(tokenStr)
 		if err != nil {
 			p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
 			return
 		}
 
-		// Ask backend about the censorship token.
-		_, err = p.backend.GetVetted(token)
-		if err == backend.ErrRecordNotFound {
-			log.Errorf("Get vetted record %v: token %v not found",
-				remoteAddr(r), tokenStr)
-			p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
-			return
-		} else if err != nil {
-			// Generic internal error.
+		// Confirm the token corresponds to a vetted record
+		_, err = p.backend.GetVetted(tokenBytes)
+		if err != nil {
 			errorCode := time.Now().Unix()
 			log.Errorf("%v Get vetted record error code %v: %v",
 				remoteAddr(r), errorCode, err)
 			p.respondWithServerError(w, errorCode)
 			return
 		}
-	}
 
-	// Convert component records into files to get added
-	filesAdd := make([]backend.File, 0, len(t.Tokens))
-	for _, recordToken := range t.Tokens {
 		// Use token for both filename and payload, to be merklized later
-		mime, digest, payload, err := util.CreateFile(recordToken, recordToken)
+		mime, digest, payload, err := util.CreateFile(tokenStr, tokenStr)
 		if err != nil {
 			errorCode := time.Now().Unix()
 			log.Errorf("%v Could not create file from record %v @ %v: %v",
-				remoteAddr(r), recordToken, errorCode, err)
+				remoteAddr(r), tokenStr, errorCode, err)
 			p.respondWithServerError(w, errorCode)
 			return
 		}
 		filesAdd = append(filesAdd, backend.File{
-			Name:    recordToken,
+			Name:    tokenStr,
 			MIME:    mime,
 			Digest:  digest,
 			Payload: payload,
 		})
 	}
 
-	rm, err := p.backend.New(nil, filesAdd)
+	// Convert user's public identity into metadata
+	ownerMetadata := backend.MetadataStream{
+		ID:      v1.SlateOwnerMDID,
+		Payload: t.User.String(),
+	}
+	metadata := []backend.MetadataStream{ownerMetadata}
+
+	rm, err := p.backend.New(metadata, filesAdd)
 	if err != nil {
 		// Check for content error.
 		if contentErr, ok := err.(backend.ContentVerificationError); ok {
@@ -452,6 +468,54 @@ func (p *politeia) updateSlate(w http.ResponseWriter, r *http.Request) {
 	// Validate token
 	token, err := util.ConvertStringToken(t.Token)
 	if err != nil {
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+		return
+	}
+
+	// Check signature to make sure user is who they say they are
+	if !t.User.VerifyMessage(token, t.Signature) {
+		errorStr := "User does not match signature."
+		log.Errorf(errorStr)
+		errContext := []string{errorStr}
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, errContext)
+		return
+	}
+
+	// Get the slate record
+	slateRecord, err := p.backend.GetUnvetted(token)
+	if err == backend.ErrRecordNotFound {
+		log.Errorf("Get slate %v: slate %v not found in either vetted or unvetted repos",
+			remoteAddr(r), t.Token)
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+		return
+	} else if err != nil {
+		// Generic internal error.
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Get unvetted record error code %v: %v",
+			remoteAddr(r), errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+
+	// Make sure the user submitting changes is the owner on record
+	var userKey string
+	var found bool
+	for _, md := range slateRecord.Metadata {
+		if md.ID == v1.SlateOwnerMDID {
+			userKey = md.Payload
+			found = true
+			break
+		}
+	}
+	if !found {
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Could not find owner for slate %v @ %v: %v",
+			remoteAddr(r), t.Token, errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+	if userKey != t.User.String() {
+		log.Errorf("User is not the owner on record.")
 		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
 		return
 	}
@@ -702,6 +766,41 @@ func (p *politeia) getSlate(w http.ResponseWriter, r *http.Request) {
 		p.respondWithServerError(w, errorCode)
 		return
 	}
+
+	// Extract the owner and append to reply
+	var ownerKey string
+	var found bool
+	for _, md := range slateRecord.Metadata {
+		if md.ID == v1.SlateOwnerMDID {
+			ownerKey = md.Payload
+			found = true
+			break
+		}
+	}
+	if !found {
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Could not find owner for slate %v @ %v: %v",
+			remoteAddr(r), t.Token, errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+	ownerBytes, err := hex.DecodeString(ownerKey)
+	if err != nil {
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Could not retrieve owner of slate %v @ %v: %v",
+			remoteAddr(r), t.Token, errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+	ownerId, err := identity.PublicIdentityFromBytes(ownerBytes)
+	if err != nil {
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Could not convert owner key to ID %v @ %v: %v",
+			remoteAddr(r), t.Token, errorCode, err)
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+	reply.Owner = *ownerId
 
 	// Append censorship record to the reply
 	rm := slateRecord.RecordMetadata
