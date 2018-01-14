@@ -1158,6 +1158,12 @@ func (g *gitBackEnd) newRecord(token []byte, metadata []backend.MetadataStream, 
 		return nil, err
 	}
 
+	// Immediately publish
+	err = g.publish(brm, id)
+	if err != nil {
+		return nil, err
+	}
+
 	return brm, nil
 }
 
@@ -1943,66 +1949,189 @@ func (g *gitBackEnd) setUnvettedStatus(token []byte, status backend.MDStatusT, m
 
 	// We only allow a transition from unvetted to vetted or censored
 	switch {
+	// Publish
 	case (brm.Status == backend.MDStatusUnvetted ||
 		brm.Status == backend.MDStatusIterationUnvetted) &&
 		status == backend.MDStatusVetted:
-
-		// unvetted -> vetted
-
-		// Update MD first
-		brm.Status = backend.MDStatusVetted
-		brm.Version += 1
-		brm.Timestamp = time.Now().Unix()
-		err = updateMD(g.unvetted, id, brm)
+		err := g.publish(brm, id)
 		if err != nil {
 			return oldStatus, err
 		}
 
-		// Handle metadata
-		err = g.updateMetadata(id, mdAppend, mdOverwrite)
-		if err != nil {
-			return oldStatus, err
-		}
-
-		// Commit brm
-		err = g.commitMD(g.unvetted, id, "published")
-		if err != nil {
-			return oldStatus, err
-		}
-
-		// Create and rebase PR
-		err = g.rebasePR(id)
-		if err != nil {
-			return oldStatus, err
-		}
-
-	case brm.Status == backend.MDStatusUnvetted &&
+		// Censor
+	case brm.Status == backend.MDStatusVetted &&
 		status == backend.MDStatusCensored:
-		// unvetted -> censored
-		brm.Status = backend.MDStatusCensored
+		err := g.censor(brm, id)
+		if err != nil {
+			return oldStatus, err
+		}
+
+		// Referendum
+	case brm.Status == backend.MDStatusCensored &&
+		status == backend.MDStatusReferendum:
+		// censored -> referendum
+		brm.Status = backend.MDStatusReferendum
 		brm.Version += 1
-		brm.Timestamp = time.Now().Unix()
 		err = updateMD(g.unvetted, id, brm)
 		if err != nil {
 			return oldStatus, err
 		}
 
-		// Handle metadata
-		err = g.updateMetadata(id, mdAppend, mdOverwrite)
+		// Commit brm
+		err = g.commitMD(g.unvetted, id, "referendum")
 		if err != nil {
 			return oldStatus, err
 		}
 
-		// Commit brm
-		err = g.commitMD(g.unvetted, id, "censored")
-		if err != nil {
-			return oldStatus, err
-		}
 	default:
 		return oldStatus, backend.ErrInvalidTransition
 	}
 
 	return brm.Status, nil
+}
+
+func (g *gitBackEnd) publish(brm *backend.RecordMetadata, id string) error {
+	// Publish by merge squashing
+
+	// Update status
+	brm.Status = backend.MDStatusVetted
+	brm.Version += 1
+	brm.Timestamp = time.Now().Unix()
+	err := updateMD(g.unvetted, id, brm)
+	if err != nil {
+		return err
+	}
+
+	// UNVETTED //
+
+	// Commit status
+	err = g.commitMD(g.unvetted, id, "published")
+	if err != nil {
+		return err
+	}
+
+	// git checkout master
+	err = g.gitCheckout(g.unvetted, "master")
+	if err != nil {
+		return err
+	}
+
+	// git pull --ff-only --rebase
+	err = g.gitPull(g.unvetted, true)
+	if err != nil {
+		return err
+	}
+
+	// git checkout id
+	err = g.gitCheckout(g.unvetted, id)
+	if err != nil {
+		return backend.ErrRecordNotFound
+	}
+
+	// git rebase master
+	err = g.gitRebase(g.unvetted, "master")
+	if err != nil {
+		return err
+	}
+
+	// PUSH BRANCH TO MASTER
+
+	// git push --set-upstream origin id
+	err = g.gitPush(g.unvetted, "origin", id, true)
+	if err != nil {
+		return err
+	}
+
+	//
+	// VETTED REPO MERGE
+	//
+
+	// squash and merge
+	err = g.gitSquashMerge(g.vetted, id)
+	if err != nil {
+		return err
+	}
+
+	// commit the merge with predefined repo
+	commitMsg := pd.CommitPrefixPublish
+	commitMsg += " "
+	commitMsg += id
+	err = g.gitCommit(g.vetted, commitMsg)
+	if err != nil {
+		return err
+	}
+
+	// git branch -D id
+	err = g.gitBranchDelete(g.vetted, id)
+	if err != nil {
+		return err
+	}
+
+	//
+	// UNVETTED REPO SYNC
+	//
+
+	// git checkout master
+	err = g.gitCheckout(g.unvetted, "master")
+	if err != nil {
+		return err
+	}
+
+	// git pull --ff-only --rebase
+	err = g.gitPull(g.unvetted, true)
+	if err != nil {
+		return err
+	}
+
+	// git branch -D id
+	return g.gitBranchDelete(g.unvetted, id)
+}
+
+func (g *gitBackEnd) censor(brm *backend.RecordMetadata, id string) error {
+	// Censor by reverting
+
+	// UNVETTED: Fork master to branch id and pull down
+	err := g.gitNewBranch(g.vetted, id)
+	if err != nil {
+		return err
+	}
+	err = g.gitPull(g.unvetted, false)
+	if err != nil {
+		return err
+	}
+
+	// VETTED: Revert the previously made commit to publish
+	commitHash, err := g.findCommit(g.vetted, pd.CommitPrefixPublish, id)
+	if err != nil {
+		return err
+	}
+	err = g.gitRevert(g.vetted, commitHash)
+	if err != nil {
+		return err
+	}
+
+	// UNVETTED: Set the status to censored
+	brm.Status = backend.MDStatusCensored
+	brm.Version += 1
+	brm.Timestamp = time.Now().Unix()
+	err = updateMD(g.unvetted, id, brm)
+	if err != nil {
+		return err
+	}
+
+	// Handle metadata
+	err = g.updateMetadata(id, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	// Commit brm
+	err = g.commitMD(g.unvetted, id, "censored")
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SetUnvettedStatus tries to update the status for an unvetted record.  If

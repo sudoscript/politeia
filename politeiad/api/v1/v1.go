@@ -78,6 +78,10 @@ const (
 	DefaultTestnetPort = "59374"
 
 	Forward = "X-Forwarded-For"
+
+	// Prefixes for standard commits
+	CommitPrefixPublish = "Publish"
+	CommitPrefixCensor  = "Censor"
 )
 
 var (

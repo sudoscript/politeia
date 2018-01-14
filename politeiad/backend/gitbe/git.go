@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -253,6 +254,56 @@ func (g *gitBackEnd) gitPull(path string, fastForward bool) error {
 func (g *gitBackEnd) gitRebase(path, branch string) error {
 	_, err := g.git(path, "rebase", branch)
 	return err
+}
+
+func (g *gitBackEnd) gitSquashMerge(path, branch string) error {
+	_, err := g.git(path, "merge", "--squash", branch)
+	return err
+}
+
+// Find a git commit by prefix and ID
+// This should only be used on vetted master
+func (g *gitBackEnd) findCommit(path, prefix, id string) (string, error) {
+	// Get the full log
+	log, err := g.git(path, "log", "--oneline")
+	if err != nil {
+		return "", err
+	}
+
+	// Go through log and find matching line
+	regexStr := fmt.Sprintf(".*%v %v", prefix, id)
+	regexCommit := regexp.MustCompile(regexStr)
+	var found bool
+	var commitHash string
+	for _, commit := range log {
+		match := regexCommit.FindString(commit)
+		if match == "" {
+			continue
+		}
+
+		found = true
+		words := strings.Fields(commit)
+		commitHash = words[0]
+		break
+	}
+
+	if !found {
+		return "", fmt.Errorf("No commit found with prefix '%v' and ID '%v'", prefix, id)
+	}
+
+	return commitHash, nil
+}
+
+// Set up a revert, but don't commit
+// This should only be used on vetted master
+func (g *gitBackEnd) gitRevert(path, commit string) error {
+	// Get the full log
+	_, err := g.git(path, "revert", "-n", commit)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (g *gitBackEnd) gitPush(path, remote, branch string, upstream bool) error {
