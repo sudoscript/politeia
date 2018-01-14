@@ -1938,11 +1938,19 @@ func (g *gitBackEnd) setUnvettedStatus(token []byte, status backend.MDStatusT, m
 	// Load MD from appropriate repo
 	var repo string
 	switch {
-	// If censoring, record is currently public
+	// If censoring, record must be currently public
 	case status == backend.MDStatusCensored:
 		repo = g.vetted
 	default:
 		repo = g.unvetted
+	}
+
+	// Set up unvetted in appropriate branch if required
+	if repo == g.unvetted {
+		err := g.gitCheckout(g.unvetted, id)
+		if err != nil {
+			return backend.MDStatusInvalid, err
+		}
 	}
 
 	brm, err := loadMD(repo, id)
@@ -1973,19 +1981,7 @@ func (g *gitBackEnd) setUnvettedStatus(token []byte, status backend.MDStatusT, m
 		// Referendum
 	case brm.Status == backend.MDStatusCensored &&
 		status == backend.MDStatusReferendum:
-		// censored -> referendum
-		brm.Status = backend.MDStatusReferendum
-		brm.Version += 1
-		err = updateMD(g.unvetted, id, brm)
-		if err != nil {
-			return oldStatus, err
-		}
-
-		// Commit brm
-		err = g.commitMD(g.unvetted, id, "referendum")
-		if err != nil {
-			return oldStatus, err
-		}
+		g.callReferendum(brm, id)
 
 	default:
 		return oldStatus, backend.ErrInvalidTransition
@@ -2144,6 +2140,23 @@ func (g *gitBackEnd) censor(brm *backend.RecordMetadata, id string) error {
 
 	// git checkout master
 	err = g.gitCheckout(g.unvetted, "master")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (g *gitBackEnd) callReferendum(brm *backend.RecordMetadata, id string) error {
+	brm.Status = backend.MDStatusReferendum
+	brm.Version += 1
+	err := updateMD(g.unvetted, id, brm)
+	if err != nil {
+		return err
+	}
+
+	// Commit brm
+	err = g.commitMD(g.unvetted, id, "referendum")
 	if err != nil {
 		return err
 	}
