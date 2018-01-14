@@ -1933,21 +1933,25 @@ func (g *gitBackEnd) GetVetted(token []byte) (*backend.Record, error) {
 // function fails we can simply unwind it by calling a git stash.
 // Function must be called with the lock held.
 func (g *gitBackEnd) setUnvettedStatus(token []byte, status backend.MDStatusT, mdAppend, mdOverwrite []backend.MetadataStream) (backend.MDStatusT, error) {
-	// git checkout id
 	id := hex.EncodeToString(token)
-	err := g.gitCheckout(g.unvetted, id)
-	if err != nil {
-		return backend.MDStatusInvalid, backend.ErrRecordNotFound
+
+	// Load MD from appropriate repo
+	var repo string
+	switch {
+	// If censoring, record is currently public
+	case status == backend.MDStatusCensored:
+		repo = g.vetted
+	default:
+		repo = g.unvetted
 	}
 
-	// Load MD
-	brm, err := loadMD(g.unvetted, id)
+	brm, err := loadMD(repo, id)
 	if err != nil {
 		return backend.MDStatusInvalid, err
 	}
 	oldStatus := brm.Status
 
-	// We only allow a transition from unvetted to vetted or censored
+	// Take the appropriate action
 	switch {
 	// Publish
 	case (brm.Status == backend.MDStatusUnvetted ||
@@ -2090,12 +2094,12 @@ func (g *gitBackEnd) publish(brm *backend.RecordMetadata, id string) error {
 func (g *gitBackEnd) censor(brm *backend.RecordMetadata, id string) error {
 	// Censor by reverting
 
-	// UNVETTED: Fork master to branch id and pull down
+	// VETTED: Fork master to branch id and pull down
 	err := g.gitNewBranch(g.vetted, id)
 	if err != nil {
 		return err
 	}
-	err = g.gitPull(g.unvetted, false)
+	err = g.gitCheckout(g.vetted, "master")
 	if err != nil {
 		return err
 	}
@@ -2109,6 +2113,19 @@ func (g *gitBackEnd) censor(brm *backend.RecordMetadata, id string) error {
 	if err != nil {
 		return err
 	}
+	commitMsg := pd.CommitPrefixCensor
+	commitMsg += " "
+	commitMsg += id
+	err = g.gitCommit(g.vetted, commitMsg)
+	if err != nil {
+		return err
+	}
+
+	// UNVETTED: Checkout branch id from origin
+	err = g.gitCheckoutRemoteBranch(g.unvetted, "origin", id)
+	if err != nil {
+		return err
+	}
 
 	// UNVETTED: Set the status to censored
 	brm.Status = backend.MDStatusCensored
@@ -2119,14 +2136,14 @@ func (g *gitBackEnd) censor(brm *backend.RecordMetadata, id string) error {
 		return err
 	}
 
-	// Handle metadata
-	err = g.updateMetadata(id, nil, nil)
+	// Commit brm
+	err = g.commitMD(g.unvetted, id, "censored")
 	if err != nil {
 		return err
 	}
 
-	// Commit brm
-	err = g.commitMD(g.unvetted, id, "censored")
+	// git checkout master
+	err = g.gitCheckout(g.unvetted, "master")
 	if err != nil {
 		return err
 	}

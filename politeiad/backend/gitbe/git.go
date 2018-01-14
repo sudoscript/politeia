@@ -237,6 +237,18 @@ func (g *gitBackEnd) gitBranchNow(path string) (string, error) {
 	return "", fmt.Errorf("unexpected git output")
 }
 
+func (g *gitBackEnd) gitCheckoutRemoteBranch(path, remote, id string) error {
+	branchPath := remote
+	branchPath += "/"
+	branchPath += id
+	_, err := g.git(path, "checkout", "-t", branchPath)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (g *gitBackEnd) gitPull(path string, fastForward bool) error {
 	var err error
 	if fastForward {
