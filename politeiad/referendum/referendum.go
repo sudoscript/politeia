@@ -68,12 +68,12 @@ func (r *Referendum) GetResults() (ReferendumResults, backend.MDStatusT, error) 
 	}
 
 	if results[v1.Approve] > results[v1.NotApprove] {
-		status = backend.MDStatusVetted
+		status = backend.MDStatusVettedFinal
 	} else {
 		// TODO: You should be able to call a referendum only once
 		//       Maybe a new type of status?
 		// Keep it censored
-		status = backend.MDStatusCensored
+		status = backend.MDStatusCensoredFinal
 	}
 
 	return results, status, nil

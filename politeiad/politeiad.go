@@ -70,6 +70,10 @@ func convertBackendStatus(status backend.MDStatusT) v1.RecordStatusT {
 		s = v1.RecordStatusUnreviewedChanges
 	case backend.MDStatusReferendum:
 		s = v1.RecordStatusReferendum
+	case backend.MDStatusCensoredFinal:
+		s = v1.RecordStatusCensoredFinal
+	case backend.MDStatusVettedFinal:
+		s = v1.RecordStatusVettedFinal
 	}
 	return s
 }
@@ -454,6 +458,7 @@ func (p *politeia) getVetted(w http.ResponseWriter, r *http.Request) {
 			t.Token)
 	}
 
+	log.Infof("Vetted record %v backend status %v frontend status %v", t.Token, bpr.RecordMetadata.Status, reply.Record.Status)
 	util.RespondWithJSON(w, http.StatusOK, reply)
 }
 
@@ -640,17 +645,11 @@ func (p *politeia) referendumResults(w http.ResponseWriter, r *http.Request) {
 
 	voteResults, newStatus, err := ref.GetResults()
 	if err != nil {
-		errorCode := time.Now().Unix()
-		log.Errorf("%v Unable to get referendum results %v: %v",
-			remoteAddr(r), errorCode, err)
-		p.respondWithServerError(w, errorCode)
+		errorMsg := fmt.Sprintf("Unable to get referendum results: %v", err)
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRecordStatusTransition, []string{errorMsg})
 		return
 	}
 
-	log.Errorf("Proposal: %v", ref.Record)
-	log.Errorf("Proposal status: %v", ref.Record.RecordMetadata.Status)
-	log.Errorf("Proposal status converted: %v", convertBackendStatus(ref.Record.RecordMetadata.Status))
-	log.Errorf("Proposal status converted: %v", convertBackendStatus(ref.Record.RecordMetadata.Status))
 	// Only change status first time results are checked
 	if newStatus != ref.Record.RecordMetadata.Status {
 		// Validate token
@@ -686,7 +685,7 @@ func (p *politeia) referendumResults(w http.ResponseWriter, r *http.Request) {
 	log.Errorf("results: %v", voteResults)
 	reply.VotesFor = voteResults[v1.Approve]
 	reply.VotesAgainst = voteResults[v1.NotApprove]
-	reply.Status = v1.RecordStatus[v1.RecordStatusReferendum]
+	reply.Status = convertBackendStatus(newStatus)
 	util.RespondWithJSON(w, http.StatusOK, reply)
 }
 

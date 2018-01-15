@@ -1978,10 +1978,26 @@ func (g *gitBackEnd) setUnvettedStatus(token []byte, status backend.MDStatusT, m
 			return oldStatus, err
 		}
 
-		// Referendum
+		// Call Referendum
 	case brm.Status == backend.MDStatusCensored &&
 		status == backend.MDStatusReferendum:
-		g.callReferendum(brm, id)
+		err = g.callReferendum(brm, id)
+
+		// Censor for good if referendum fails
+	case brm.Status == backend.MDStatusReferendum &&
+		status == backend.MDStatusCensoredFinal:
+		err = g.censorFinal(brm, id)
+		if err != nil {
+			return oldStatus, err
+		}
+
+		// Publish for good if referendum fails
+	case brm.Status == backend.MDStatusReferendum &&
+		status == backend.MDStatusVettedFinal:
+		err = g.publishFinal(brm, id)
+		if err != nil {
+			return oldStatus, err
+		}
 
 	default:
 		return oldStatus, backend.ErrInvalidTransition
@@ -2087,6 +2103,61 @@ func (g *gitBackEnd) publish(brm *backend.RecordMetadata, id string) error {
 	return g.gitBranchDelete(g.unvetted, id)
 }
 
+func (g *gitBackEnd) publishFinal(brm *backend.RecordMetadata, id string) error {
+	// Publish for good by reverting the revert
+
+	// VETTED: Revert the previously made commit to censor
+	commitHash, err := g.findCommit(g.vetted, pd.CommitPrefixCensor, id)
+	if err != nil {
+		return err
+	}
+
+	err = g.gitRevert(g.vetted, commitHash)
+	if err != nil {
+		return err
+	}
+
+	// Update status
+	brm.Status = backend.MDStatusVettedFinal
+	brm.Version += 1
+	brm.Timestamp = time.Now().Unix()
+	err = updateMD(g.vetted, id, brm)
+	if err != nil {
+		return err
+	}
+
+	err = g.gitAdd(g.vetted, ".")
+	if err != nil {
+		return err
+	}
+
+	// Commit revert and metatadata changes
+	commitMsg := pd.CommitPrefixOverturn
+	commitMsg += " "
+	commitMsg += id
+	err = g.gitCommit(g.vetted, commitMsg)
+	if err != nil {
+		return err
+	}
+
+	// UNVETTED: Sync with master, then delete branch id
+
+	// git checkout master
+	err = g.gitCheckout(g.unvetted, "master")
+	if err != nil {
+		return err
+	}
+
+	// git pull --ff-only --rebase
+	err = g.gitPull(g.unvetted, true)
+	if err != nil {
+		return err
+	}
+
+	// git branch -D id
+	return g.gitBranchDelete(g.unvetted, id)
+}
+
 func (g *gitBackEnd) censor(brm *backend.RecordMetadata, id string) error {
 	// Censor by reverting
 
@@ -2157,6 +2228,33 @@ func (g *gitBackEnd) callReferendum(brm *backend.RecordMetadata, id string) erro
 
 	// Commit brm
 	err = g.commitMD(g.unvetted, id, "referendum")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (g *gitBackEnd) censorFinal(brm *backend.RecordMetadata, id string) error {
+	// Censor by reverting
+
+	// UNVETTED: Set the status to censoredFinal
+	brm.Status = backend.MDStatusCensoredFinal
+	brm.Version += 1
+	brm.Timestamp = time.Now().Unix()
+	err := updateMD(g.unvetted, id, brm)
+	if err != nil {
+		return err
+	}
+
+	// Commit brm
+	err = g.commitMD(g.unvetted, id, "referendum failed")
+	if err != nil {
+		return err
+	}
+
+	// git checkout master
+	err = g.gitCheckout(g.unvetted, "master")
 	if err != nil {
 		return err
 	}

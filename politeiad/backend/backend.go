@@ -60,6 +60,8 @@ const (
 	MDStatusCensored          MDStatusT = 3 // Censored record
 	MDStatusIterationUnvetted MDStatusT = 4 // Changes are unvetted
 	MDStatusReferendum        MDStatusT = 5 // Proposal undergoing referendum
+	MDStatusCensoredFinal     MDStatusT = 6 // Censorship confirmed by vote
+	MDStatusVettedFinal       MDStatusT = 7 // Censorship overturned by vote
 )
 
 var (
@@ -71,6 +73,8 @@ var (
 		MDStatusCensored:          "censored",
 		MDStatusIterationUnvetted: "iteration unvetted",
 		MDStatusReferendum:        "referendum",
+		MDStatusCensoredFinal:     "censored (final)",
+		MDStatusVettedFinal:       "public (final)",
 	}
 )
 

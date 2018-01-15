@@ -852,22 +852,20 @@ func convertStatus(s string) (v1.RecordStatusT, error) {
 }
 
 func setUnvettedStatus() error {
+	// THIS IS ONLY FOR CENSORING NOW
+
 	flags := flag.Args()[1:] // Chop off action.
 
 	// Make sure we have the status and the censorship token
-	if len(flags) < 2 {
-		return fmt.Errorf("must at least provide status and " +
-			"censorship token")
+	if len(flags) < 1 {
+		return fmt.Errorf("must provide censorship token")
 	}
 
 	// Verify we got a valid status
-	status, err := convertStatus(flags[0])
-	if err != nil {
-		return err
-	}
+	status := v1.RecordStatusCensored
 
 	// Validate censorship token
-	_, err = util.ConvertStringToken(flags[1])
+	_, err := util.ConvertStringToken(flags[0])
 	if err != nil {
 		return err
 	}
@@ -886,38 +884,7 @@ func setUnvettedStatus() error {
 	n := v1.SetUnvettedStatus{
 		Challenge: hex.EncodeToString(challenge),
 		Status:    status,
-		Token:     flags[1],
-	}
-
-	// Optional metadata updates
-	for _, v := range flags[2:] {
-		switch {
-		case regexAppendMD.MatchString(v):
-			s := regexAppendMD.FindString(v)
-			i, err := strconv.ParseUint(regexMDID.FindString(s),
-				10, 64)
-			if err != nil {
-				return err
-			}
-			n.MDAppend = append(n.MDAppend, v1.MetadataStream{
-				ID:      i,
-				Payload: v[len(s):],
-			})
-
-		case regexOverwriteMD.MatchString(v):
-			s := regexOverwriteMD.FindString(v)
-			i, err := strconv.ParseUint(regexMDID.FindString(s),
-				10, 64)
-			if err != nil {
-				return err
-			}
-			n.MDOverwrite = append(n.MDOverwrite, v1.MetadataStream{
-				ID:      i,
-				Payload: v[len(s):],
-			})
-		default:
-			return fmt.Errorf("invalid metadata action %v", v)
-		}
+		Token:     flags[0],
 	}
 
 	// Convert to JSON
@@ -1302,14 +1269,16 @@ func _main() error {
 				return getIdentity()
 			case "inventory":
 				return inventory()
-			case "getunvetted":
+			case "getcensored":
 				return getUnvetted()
-			case "getvetted":
+			case "getpublic":
 				return getVetted()
-			case "setunvettedstatus":
-				return setUnvettedStatus()
 			case "update":
 				return updateRecord()
+			case "publish":
+				return newRecord()
+			case "censor":
+				return setUnvettedStatus()
 			case "referendum":
 				return callReferendum()
 			case "vote":

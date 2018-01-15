@@ -69,7 +69,9 @@ const (
 	RecordStatusUnreviewedChanges RecordStatusT = 5
 
 	// Referendum
-	RecordStatusReferendum RecordStatusT = 7 // Proposal is under referendum
+	RecordStatusReferendum    RecordStatusT = 7 // Proposal is under referendum
+	RecordStatusCensoredFinal RecordStatusT = 8 // Censorship confirmed by vote
+	RecordStatusVettedFinal   RecordStatusT = 9 // Censorship overturned by vote
 
 	// Default network bits
 	DefaultMainnetHost = "politeia.decred.org"
@@ -80,8 +82,9 @@ const (
 	Forward = "X-Forwarded-For"
 
 	// Prefixes for standard commits
-	CommitPrefixPublish = "Publish"
-	CommitPrefixCensor  = "Censor"
+	CommitPrefixPublish  = "Publish"
+	CommitPrefixCensor   = "Censor"
+	CommitPrefixOverturn = "Overturn censorship"
 )
 
 var (
@@ -113,6 +116,8 @@ var (
 		RecordStatusPublic:            "public",
 		RecordStatusUnreviewedChanges: "unreviewed changes",
 		RecordStatusReferendum:        "referendum",
+		RecordStatusCensoredFinal:     "censored (final)",
+		RecordStatusVettedFinal:       "public (final)",
 	}
 
 	// Input validation
@@ -374,7 +379,7 @@ const (
 	Approve    VoteT = 1
 
 	// Vote period in seconds
-	VotePeriod = 10
+	VotePeriod = 20
 )
 
 type ReferendumRequest struct {
@@ -409,8 +414,8 @@ type ReferendumResultsRequest struct {
 }
 
 type ReferendumResultsReply struct {
-	Response     string `json:"response"` // Challenge response
-	VotesFor     int    `json:"votes_for"`
-	VotesAgainst int    `json:"votes_against"`
-	Status       string `json:"status"` // Proposal status
+	Response     string        `json:"response"` // Challenge response
+	VotesFor     int           `json:"votes_for"`
+	VotesAgainst int           `json:"votes_against"`
+	Status       RecordStatusT `json:"status"` // Proposal status
 }
