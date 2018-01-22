@@ -16,6 +16,7 @@ import (
 	"net/http/httputil"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -582,7 +583,9 @@ func (p *politeia) referendumVote(w http.ResponseWriter, r *http.Request) {
 	// Validate token
 	token, err := util.ConvertStringToken(t.Token)
 	if err != nil {
-		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Invalid Token"})
+		errorMsg := fmt.Sprintf("Unable to convert string token to bytes: %v", err)
+		log.Errorf(errorMsg)
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{errorMsg})
 		return
 	}
 
@@ -632,21 +635,80 @@ func (p *politeia) referendumResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := p.identity.SignMessage(challenge)
-
 	reply := v1.ReferendumResultsReply{
 		Response: hex.EncodeToString(response[:]),
 	}
 
-	// Validate user's signature on token
-	// NOT WORKING
-	// if !t.User.VerifyMessage(token, t.Signature) {
-	// 	p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{"Invalid user signature"})
-	// 	return
-	// }
+	// Validate token
+	token, err := util.ConvertStringToken(t.Token)
+	if err != nil {
+		errorMsg := fmt.Sprintf("Unable to convert string token to bytes: %v", err)
+		log.Errorf(errorMsg)
+		p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, []string{errorMsg})
+		return
+	}
+
+	bpr, err := p.backend.GetUnvetted(token)
+	if err == backend.ErrRecordNotFound {
+		reply.Status = v1.RecordStatusNotFound
+		log.Errorf("Get unvetted record %v: token %v not found",
+			remoteAddr(r), t.Token)
+	} else if err != nil {
+		// Generic internal error.
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Get unvetted record error code %v: %v",
+			remoteAddr(r), errorCode, err)
+
+		p.respondWithServerError(w, errorCode)
+		return
+	}
+
+	// Check if results were already tabulated
+	// If so, extract the votes and return from metadata
+	currStatus := bpr.RecordMetadata.Status
+	if (currStatus == backend.MDStatusVettedFinal) ||
+		(currStatus == backend.MDStatusCensoredFinal) {
+		reply.Status = convertBackendStatus(currStatus)
+		var foundVotesFor, foundVotesAgainst bool
+		for _, md := range bpr.Metadata {
+			switch md.ID {
+			case v1.ReferendumVotesForMDID:
+				reply.VotesFor, err = strconv.Atoi(md.Payload)
+				if err != nil {
+					errorCode := time.Now().Unix()
+					log.Errorf("%v Unable to extract votes from metadata payload %v: %v", remoteAddr(r),
+						errorCode, err)
+					p.respondWithServerError(w, errorCode)
+					return
+				}
+				foundVotesFor = true
+
+			case v1.ReferendumVotesAgainstMDID:
+				reply.VotesAgainst, err = strconv.Atoi(md.Payload)
+				if err != nil {
+					errorCode := time.Now().Unix()
+					log.Errorf("%v Unable to extract votes from metadata payload %v: %v", remoteAddr(r),
+						errorCode, err)
+					p.respondWithServerError(w, errorCode)
+					return
+				}
+				foundVotesAgainst = true
+
+			default:
+				continue
+			}
+		}
+
+		if foundVotesFor && foundVotesAgainst {
+			util.RespondWithJSON(w, http.StatusOK, reply)
+			return
+		}
+	}
+
+	// Otherwise get the results and store them
 
 	// Find token in AllReferendums
 	ref := referendum.AllReferendums[t.Token]
-	// TODO: What if token not found in referendums?
 
 	voteResults, newStatus, err := ref.GetResults()
 	if err != nil {
@@ -655,39 +717,39 @@ func (p *politeia) referendumResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only change status first time results are checked
-	if newStatus != ref.Record.RecordMetadata.Status {
-		// Validate token
-		token, err := util.ConvertStringToken(t.Token)
-		if err != nil {
-			p.respondWithUserError(w, v1.ErrorStatusInvalidRequestPayload, nil)
+	// Add vote counts as metadata
+	votesMetadata := []backend.MetadataStream{
+		backend.MetadataStream{
+			ID:      v1.ReferendumVotesForMDID,
+			Payload: strconv.Itoa(voteResults[v1.Approve]),
+		},
+		backend.MetadataStream{
+			ID:      v1.ReferendumVotesAgainstMDID,
+			Payload: strconv.Itoa(voteResults[v1.NotApprove]),
+		},
+	}
+	// Ask backend to update status
+	status, err := p.backend.SetUnvettedStatus(token, newStatus, votesMetadata, nil)
+	if err != nil {
+		oldStatus := v1.RecordStatus[convertBackendStatus(status)]
+		newStatus := v1.RecordStatus[convertBackendStatus(newStatus)]
+		// Check for specific errors
+		if err == backend.ErrInvalidTransition {
+			log.Errorf("%v Invalid status code transition: "+
+				"%v %v->%v", remoteAddr(r), t.Token, oldStatus,
+				newStatus)
+			p.respondWithUserError(w, v1.ErrorStatusInvalidRecordStatusTransition, nil)
 			return
 		}
+		// Generic internal error.
+		errorCode := time.Now().Unix()
+		log.Errorf("%v Set unvetted status error code %v: %v",
+			remoteAddr(r), errorCode, err)
 
-		// Ask backend to update status
-		status, err := p.backend.SetUnvettedStatus(token, newStatus, nil, nil)
-		if err != nil {
-			oldStatus := v1.RecordStatus[convertBackendStatus(status)]
-			newStatus := v1.RecordStatus[convertBackendStatus(newStatus)]
-			// Check for specific errors
-			if err == backend.ErrInvalidTransition {
-				log.Errorf("%v Invalid status code transition: "+
-					"%v %v->%v", remoteAddr(r), t.Token, oldStatus,
-					newStatus)
-				p.respondWithUserError(w, v1.ErrorStatusInvalidRecordStatusTransition, nil)
-				return
-			}
-			// Generic internal error.
-			errorCode := time.Now().Unix()
-			log.Errorf("%v Set unvetted status error code %v: %v",
-				remoteAddr(r), errorCode, err)
-
-			p.respondWithServerError(w, errorCode)
-			return
-		}
+		p.respondWithServerError(w, errorCode)
+		return
 	}
 
-	log.Errorf("results: %v", voteResults)
 	reply.VotesFor = voteResults[v1.Approve]
 	reply.VotesAgainst = voteResults[v1.NotApprove]
 	reply.Status = convertBackendStatus(newStatus)

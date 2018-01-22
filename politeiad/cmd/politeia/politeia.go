@@ -762,7 +762,7 @@ func getUnvetted() error {
 	}
 
 	if !*printJson {
-		printRecordRecord("Unvetted record", reply.Record)
+		printRecordRecord("Censored Post", reply.Record)
 	}
 	return nil
 }
@@ -863,7 +863,7 @@ func getVetted() error {
 	}
 
 	if !*printJson {
-		printRecordRecord("Vetted record", reply.Record)
+		printRecordRecord("Public Post", reply.Record)
 	}
 	return nil
 }
@@ -977,7 +977,7 @@ func setUnvettedStatus() error {
 	return nil
 }
 
-func callReferendum() error {
+func referendumCall() error {
 	// Example command: politeia referendum <token>
 
 	flags := flag.Args()[1:] // Chop off action.
@@ -1071,7 +1071,7 @@ func callReferendum() error {
 	return nil
 }
 
-func voteOnReferendum() error {
+func referendumVote() error {
 	// Example command: politeia vote reverse|uphold <token>
 
 	flags := flag.Args()[1:] // Chop off action.
@@ -1179,7 +1179,7 @@ func voteOnReferendum() error {
 	return nil
 }
 
-func concludeReferendum() error {
+func referendumResults() error {
 	// Example command: politeia results <token>
 
 	flags := flag.Args()[1:] // Chop off action.
@@ -1312,11 +1312,11 @@ func _main() error {
 			case "censor":
 				return setUnvettedStatus()
 			case "referendum":
-				return callReferendum()
+				return referendumCall()
 			case "vote":
-				return voteOnReferendum()
+				return referendumVote()
 			case "results":
-				return concludeReferendum()
+				return referendumResults()
 			default:
 				return fmt.Errorf("invalid action: %v", a)
 			}

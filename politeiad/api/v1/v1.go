@@ -85,6 +85,10 @@ const (
 	CommitPrefixPublish  = "Publish"
 	CommitPrefixCensor   = "Censor"
 	CommitPrefixOverturn = "Overturn censorship"
+
+	// Metadata IDs for where votes data is stored
+	ReferendumVotesForMDID     = 89
+	ReferendumVotesAgainstMDID = 88
 )
 
 var (
@@ -404,8 +408,9 @@ type ReferendumVoteRequest struct {
 }
 
 type ReferendumVoteReply struct {
-	Response string `json:"response"` // Challenge response
-	Status   string `json:"status"`   // Proposal status
+	Response  string                       `json:"response"`  // Challenge response
+	Status    string                       `json:"status"`    // Proposal status
+	Signature [identity.SignatureSize]byte `json:"signature"` // Signed token
 }
 
 type ReferendumResultsRequest struct {
