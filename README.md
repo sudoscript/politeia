@@ -1,205 +1,206 @@
-# politeia
-[![Build Status](http://img.shields.io/travis/decred/politeia.svg)](https://travis-ci.org/decred/politeia)
-[![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
+# *Immutable Campaign Promises*
 
-Politeia is the Decred proposal system.
+Politicians running for office make a lot of promises. Few are rarely ever kept.
 
-The politeia stack is as follows:
+This prototype uses [Politeia](https://github.com/decred/politeia), the Decred proposal system, to hold politicians accountable to the promises they made on the campaign trail.
 
+* Anyone can submit a policy idea. They are vetted by a governing body, such as an election commission.
+* Candidates running for office bundle groups of vetted policy ideas into slates of campaign promises.
+* Slates are signed by the candidate and identified with their public key. Only they can create or change them.
+* The governing body can finalize slates, after which they can no longer be changed.
+* Merkle trees guarantee that campaign promises cannot be changed or removed from the slate.
+* Before the next election, voters can validate which promises were kept and which were broken.
+
+## Install and Run
+
+Clone this repo. You'll need to save it to the regular Politeia directory to maintain package linkages, so be sure to save or push local changes before cloning.
 ```
-~~~~~~~~ Internet ~~~~~~~~~
-            |
-+-------------------------+
-|      politeia www       |
-+-------------------------+
-            |
-+-------------------------+
-|        politeiad        |
-+-------------------------+
-|       git backend       |
-+-------------------------+
-            |
-~~~~~~~~ Internet ~~~~~~~~~
-            |
-+-------------------------+
-|        dcrtimed         |
-+-------------------------+
+$ git clone git@gitlab.com:jarins/politeia.git $GOPATH/src/github.com/decred/politeia
 ```
 
-## Components
-* politeia - Reference client application.
-* politeiad - Reference server daemon.
-* politeiaddumpdb - Politeiad database dumper for debugging purposes.
-* politeia_verify - Reference verification tool.
-* politeiawww - Web backend server.
-* politeiawww_refclient - Web reference client application.
-* politeiawww_dbutil - Politeiawww database tool for debugging and creating admin users.
-
-Note that politeiawww does not provide HTML output.  It strictly handles the
-JSON REST RPC commands only.  The GUI for politeiawww can be found at:
-https://github.com/decred/politeiagui
-
-## Integrated Projects / External APIs / Official Development URLs
-* https://faucet.decred.org - instance of [testnetfaucet](https://github.com/decred/testnetfaucet)
-  which is used by **politeiawww_refclient** to satisfy paywall requests in an
-  automated fashion.
-* https://test-proposals.decred.org/ - testing/development instance of
-  [politeiagui](https://github.com/decred/politeiagui).
-
-## Dependencies
-* git - the git command line tool must be installed on the machine that runs
-  politeiad and be in the PATH.  The version that was used to validate the
-  daemon is 2.11.0.
-
-## Library and interfaces
-* politeiad/api/v1 - JSON REST API for politeia clients.
-* politeiad/cmd/politeia - Client reference implementation
-* politeiawww/api/v1 - JSON API for WWW.
-* politeiawww/cmd/politeiawww_refclient - Reference implementation for WWW API.
-* util - common used miscellaneous utility functions.
-
-## Example
-
-The paywall functionality of politeia requires a master public key for an
-account to derive payment addresses.  You may either use one of the
-pre-generated test keys (grep the source for tpub) or you may acquire one by
-creating accounts and retrieving the public keys for those accounts:
-
-Put the result of the following command as paywallxpub=tpub... in politeiawww.conf.
-
+Then compile and launch the politeia daemon:
 ```
-dcrctl --wallet --testnet createnewaccount politeiapayments
-dcrctl --wallet --testnet getmasterpubkey politeiapayments
-```
-
-Compile and launch the politeia daemon:
-```
-cd $GOPATH/src/github.com/decred/politeia
-dep ensure && go install -v ./... && LOGFLAGS=shortfile politeiad --testnet --rpcuser=user --rpcpass=pass
+$ cd $GOPATH/src/github.com/decred/politeia
+$ git checkout campaign_promises
+$ dep ensure && go install -v ./... && LOGFLAGS=shortfile politeiad --testnet --rpcuser=user --rpcpass=pass
 ```
 
 Download server identity to client:
 ```
-politeia -v -testnet -rpchost 127.0.0.1 identity
+$ politeia -v -testnet -rpchost 127.0.0.1 identity
 ```
 Accept default path by pressing `enter`.
 
-Result should look something like this:
-```
-FQDN       : localhost
-Nick       : politeiad
-Key        : dfd6caacf0bbe5725efc67e703e912c37931b4edbf17122947a1e0fcd9755f6d
-Identity   : 99e748e13d7ecf70ef6b5afa376d692cd7cb4dbb3d26fa83f417d29e44c6bb6c
-Fingerprint: medI4T1+z3Dva1r6N21pLNfLTbs9JvqD9BfSnkTGu2w=
 
-Save to /Users/marco/Library/Application Support/Politeia/identity.json or ctrl-c to abort
-Identity saved to: /Users/marco/Library/Application Support/Politeia/identity.json
+### Propose Policy Ideas
+
+Use the CLI to publish a few campaign promises:
+```
+$ echo "No new taxes" > read_my_lips.txt
+$ politeia -v -testnet -rpchost 127.0.0.1 new read_my_lips.txt
+00: b209addb8482d4e761ab64daeafb2807a3ee2fb2a5e086a69ec98ab2663a8ec4 read_my_lips.txt text/plain; charset=utf-8
+Record submitted
+  Censorship record:
+    Merkle   : b209addb8482d4e761ab64daeafb2807a3ee2fb2a5e086a69ec98ab2663a8ec4
+    Token    : da90c356684dd113e17625b7232975320cfa9bacbc0ac15057270df52c4fa3f4
+    Signature: 3a54e7cba53f841f3a92907db887db1cf75b000dc372e89fc97acdde6121d426a0ad7f9e1b3be2b2e403c1a370234e76ad8fcd3496ee2f5121df3f4091a7900e
+
+$ echo "No new wars" > peace_in_our_time.txt
+$ politeia -v -testnet -rpchost 127.0.0.1 new peace_in_our_time.txt
+00: a5a3cd6ffe93c64bb010f7cde4d89946516059eaf3fe5bb45b10ffa75e0e3ecb peace_in_our_time.txt text/plain; charset=utf-8
+Record submitted
+  Censorship record:
+    Merkle   : a5a3cd6ffe93c64bb010f7cde4d89946516059eaf3fe5bb45b10ffa75e0e3ecb
+    Token    : 3ccb5154c7d214fb671bd8025dc771ed38f0ac84592e7dd1c6b006497aebdea8
+    Signature: 51af970f819a2f9333d5b98fd69630d0a7954520b2aea89497ada6c3d75d3b36bb303541a2f99a86a0b9b15b1bbfb76d91f02aa3db9cae41d31f947bcde68004
+
+$ echo "Create 100K new jobs" > its_economy_stupid.txt
+$ politeia -v -testnet -rpchost 127.0.0.1 new its_economy_stupid.txt
+00: 6e82da5a3c62c9866f2937456ee63d08d5e4eda453cf033ac3a68e747cb9c8fe its_economy_stupid.txt text/plain; charset=utf-8
+Record submitted
+  Censorship record:
+    Merkle   : 6e82da5a3c62c9866f2937456ee63d08d5e4eda453cf033ac3a68e747cb9c8fe
+    Token    : 02677541829a9bec6dfcede4e6b70358defd994676ad0e3d58044e775305ca1c
+    Signature: 8668f2bdb9110ba53bd23f1042b51243192c3a11d9f8dbaca4be85c2db2c43163707e8a1193796f08066085f0884d7fa204ba2b13dabe1b548177835d3bf5002
 ```
 
-Compile politeia command line tool:
+Acting as the election commission, verify the policy proposals as valid (this requires `-rpcuser=user` and `-rpcpas=pass`).
 ```
-go install -v github.com/decred/politeia/politeiad/cmd/politeia
-```
+$ politeia -v -testnet -rpchost 127.0.0.1 -rpcuser user -rpcpass pass setunvettedstatus publish da90c356684dd113e17625b7232975320cfa9bacbc0ac15057270df52c4fa3f4
+Set record status:
+  Status   : public
 
-Send proposal:
-```
-politeia -v -testnet -rpchost 127.0.0.1 new "My awesome proposal" proposal.txt spec.txt
-```
+$ politeia -v -testnet -rpchost 127.0.0.1 -rpcuser user -rpcpass pass setunvettedstatus publish 3ccb5154c7d214fb671bd8025dc771ed38f0ac84592e7dd1c6b006497aebdea8
+Set record status:
+  Status   : public
 
-Result will look something like:
-```
-00: 331ea9090db0c9f6f597bd9840fd5b171830f6e0b3ba1cb24dfa91f0c95aedc1 proposal.txt text/plain; charset=utf-8
-01: be0997732fa648fd083baa85e782d9e4768602dbe8a0a431ba17a01000ba93db spec.txt text/plain; charset=utf-8
-Submitted proposal name: My awesome proposal
-Censorship record:
-  Merkle   : 8e125a9c791634f6f68672c7bc3b71dc50f986a0525e3e7361ad180cadbf6347
-  Token    : 6284c5f8fba5665373b8e6651ebc8747b289fed242d2f880f64a284496bb4ca8
-  Signature: 82d69b4ec83d2a732fe92028dbf78853d0814aeb4fcf0ff597c110c8843720951f7b9fae4305b0f1d9346c39bc960a364590236f9e0871f6f79860fc57d4c70a
-```
-
-Publishing a proposal (requires credentials):
-```
-politeia -testnet -rpchost 127.0.0.1 -rpcuser user -rpcpass pass setunvettedstatus publish 6284c5f8fba5665373b8e6651ebc8747b289fed242d2f880f64a284496bb4ca8
-Set proposal status:
+$ politeia -v -testnet -rpchost 127.0.0.1 -rpcuser user -rpcpass pass setunvettedstatus publish 02677541829a9bec6dfcede4e6b70358defd994676ad0e3d58044e775305ca1c
+Set record status:
   Status   : public
 ```
 
-Censoring a proposal (requires credentials):
-```
-politeia -testnet -rpchost 127.0.0.1 -rpcuser user -rpcpass pass setunvettedstatus censor 527cb21b78a56d597f5ab4c199195343ecfcd56cf0d76910b2a63c97635a6532
-Set proposal status:
-  Status   : censored
-```
+### Create a Campaign Platform
 
-To independently verify that Politeia has received your proposal, you can use
-the `politeia_verify` tool and provide politeiad's public key, the proposal's
-censorship token and signature, and the proposal files:
-
+Now candidates can combine policy ideas into slates with the `newslate` command, followed by a list of space-separated vetted proposals. In order to sign the slate and prove authorship, they need to pass a user identity file with the `-user` flag. If the filename doesn't exist, it'll be created for them.
 ```
-politeia_verify -v -k dfd6caacf0bbe5725efc67e703e912c37931b4edbf17122947a1e0fcd9755f6d -t 6284c5f8fba5665373b8e6651ebc8747b289fed242d2f880f64a284496bb4ca8 -s 82d69b4ec83d2a732fe92028dbf78853d0814aeb4fcf0ff597c110c8843720951f7b9fae4305b0f1d9346c39bc960a364590236f9e0871f6f79860fc57d4c70 proposal.md
-Proposal successfully verified.
+$ politeia -v -testnet -rpchost 127.0.0.1 -user MrPopular.json newslate da90c356684dd113e17625b7232975320cfa9bacbc0ac15057270df52c4fa3f4 3ccb5154c7d214fb671bd8025dc771ed38f0ac84592e7dd1c6b006497aebdea8 02677541829a9bec6dfcede4e6b70358defd994676ad0e3d58044e775305ca1c
+Identity file found.
+  Censorship record:
+    Merkle   : e74acc2d17f0e697a0fe52551fd0736f0979bff6f5300e6dbd302f0cccf8f357
+    Token    : 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5
+    Signature: 95161f36dc2721f3c74275d8cad121c78222cce0b6fc1caedecfa8240072ffeaa55178d6ad37d6dbf66612476afae00a953dbd20cd144ebffaba1681a79b740e
 ```
 
-If the proposal fails to verify, it will return an error:
-
+Voters can see the slates, their component promises, and the public key of the candidate who published it
 ```
-politeia_verify -v -k xfd6caacf0bbe5725efc67e703e912c37931b4edbf17122947a1e0fcd9755f6d -t 6284c5f8fba5665373b8e6651ebc8747b289fed242d2f880f64a284496bb4ca8 -s 82d69b4ec83d2a732fe92028dbf78853d0814aeb4fcf0ff597c110c8843720951f7b9fae4305b0f1d9346c39bc960a364590236f9e0871f6f79860fc57d4c70 proposal.md
-Proposal failed verification. Please ensure the public key and merkle are correct.
-  Merkle: 0dd10219cd79342198085cbe6f737bd54efe119b24c84cbc053023ed6b7da4c8
+$ politeia -v -testnet -rpchost 127.0.0.1 getslate 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5
+Electoral Slate
+Owner's Public Key: 82b70ed135f6b9b5f581a7a0fa5becc9d75d57fce26c6ea2572ec78aa4532267
+  Censorship record:
+    Merkle   : e74acc2d17f0e697a0fe52551fd0736f0979bff6f5300e6dbd302f0cccf8f357
+    Token    : 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5
+    Signature: 95161f36dc2721f3c74275d8cad121c78222cce0b6fc1caedecfa8240072ffeaa55178d6ad37d6dbf66612476afae00a953dbd20cd144ebffaba1681a79b740e
 
+Electoral promise 00:
+  Status     : public
+  Timestamp  : 2018-01-24 03:46:13 +0000 UTC
+  Censorship record:
+    Merkle   : 6e82da5a3c62c9866f2937456ee63d08d5e4eda453cf033ac3a68e747cb9c8fe
+    Token    : 02677541829a9bec6dfcede4e6b70358defd994676ad0e3d58044e775305ca1c
+    Signature: 8668f2bdb9110ba53bd23f1042b51243192c3a11d9f8dbaca4be85c2db2c43163707e8a1193796f08066085f0884d7fa204ba2b13dabe1b548177835d3bf5002
+      Metadata   : []
+  File (00)  :
+    Name     : its_economy_stupid.txt
+    MIME     : text/plain; charset=utf-8
+    Digest   : 6e82da5a3c62c9866f2937456ee63d08d5e4eda453cf033ac3a68e747cb9c8fe
+
+Electoral promise 01:
+  Status     : public
+  Timestamp  : 2018-01-24 03:46:06 +0000 UTC
+  Censorship record:
+    Merkle   : a5a3cd6ffe93c64bb010f7cde4d89946516059eaf3fe5bb45b10ffa75e0e3ecb
+    Token    : 3ccb5154c7d214fb671bd8025dc771ed38f0ac84592e7dd1c6b006497aebdea8
+    Signature: 51af970f819a2f9333d5b98fd69630d0a7954520b2aea89497ada6c3d75d3b36bb303541a2f99a86a0b9b15b1bbfb76d91f02aa3db9cae41d31f947bcde68004
+  Metadata   : []
+  File (00)  :
+    Name     : peace_in_our_time.txt
+    MIME     : text/plain; charset=utf-8
+    Digest   : a5a3cd6ffe93c64bb010f7cde4d89946516059eaf3fe5bb45b10ffa75e0e3ecb
+
+Electoral promise 02:
+  Status     : public
+  Timestamp  : 2018-01-24 03:36:05 +0000 UTC
+  Censorship record:
+    Merkle   : b209addb8482d4e761ab64daeafb2807a3ee2fb2a5e086a69ec98ab2663a8ec4
+    Token    : da90c356684dd113e17625b7232975320cfa9bacbc0ac15057270df52c4fa3f4
+    Signature: 3a54e7cba53f841f3a92907db887db1cf75b000dc372e89fc97acdde6121d426a0ad7f9e1b3be2b2e403c1a370234e76ad8fcd3496ee2f5121df3f4091a7900e
+  Metadata   : []
+  File (00)  :
+    Name     : read_my_lips.txt
+    MIME     : text/plain; charset=utf-8
+    Digest   : b209addb8482d4e761ab64daeafb2807a3ee2fb2a5e086a69ec98ab2663a8ec4
 ```
 
-**Note:** All politeia commands can dump the JSON output of every RPC command
-by adding the -json command line flag.
-
-Compile and launch the web server:
+During the campaign, candidates can edit slates, by proving they hold the private key corresponding to it.
 ```
-cd $GOPATH/src/github.com/decred/politeia
-dep ensure && go install -v ./... && LOGFLAGS=shortfile politeiawww --testnet --fetchidentity
-politeiawww --testnet --rpcuser=user --rpcpass=pass
-```
-To check if the web server is running correctly:
-```
-politeiawww_refclient
+$ politeia -v -testnet -rpchost 127.0.0.1 -user MrPopular.json updateslate 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5 del:da90c356684dd113e17625b7232975320cfa9bacbc0ac15057270df52c4fa3f4
+Identity file found.
+  Censorship record:
+    Merkle   : 9c8418bec3169bc1124dcd30e19132b127b816a3ced231f6589cd426713dcd59
+    Token    : 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5
+    Signature: 0d0f0684557d0bd20284d29054964df07d728b47d43012cea9d0ba98e7491641e083dd3055b2168118eb47139db1fa8ca2c02dc3434a785256d3da5afdf28507
 ```
 
-## nginx reverse proxy sample
+### Finalize Campaign Promises in Cryptographic Immutability
 
-### testnet
+When it gets close to election day, the election commission freezes the slates.
 ```
-# politeiawww
-location /api/ {
-	# disable caching
-	expires off;
-
-	proxy_set_header Host $host;
-	proxy_set_header X-Forwarded-For $remote_addr;
-	proxy_set_header Upgrade $http_upgrade;
-	proxy_set_header Connection "upgrade";
-	proxy_bypass_cache $http_upgrade;
-
-	proxy_http_version 1.1;
-	proxy_ssl_trusted_certificated /path/to/politeiawww.crt;
-	proxy_ssl_verify on;
-	proxy_pass https://test-politeia.domain.com:4443/;
-}
-
-# politeiagui
-location / {
-	# redirect not found
-	error_page 404 =200 /;
-	proxy_intercept_errors on;
-
-	# disable caching
-	expires off;
-
-	proxy_set_header Host $host;
-	proxy_set_header X-Forwarded-For $remote_addr;
-	proxy_set_header Upgrade $http_upgrade;
-	proxy_set_header Connection "upgrade";
-	proxy_http_version 1.1;
-
-	# backend
-	proxy_pass http://127.0.0.1:8000;
-}
+$ politeia -v -testnet -rpchost 127.0.0.1 -rpcuser user -rpcpass pass setunvettedstatus publish 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5
+Set record status:
+  Status   : public
 ```
+
+After that, promises are immutable, and can no longer be added or removed by the candidates.
+```
+$ politeia -v -testnet -rpchost 127.0.0.1 -user MrPopular.json updateslate 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5 del:3ccb5154c7d214fb671bd8025dc771ed38f0ac84592e7dd1c6b006497aebdea8
+Identity file found.
+400 Bad Request: invalid request payload:
+```
+
+Voters can continue to see published slates, and can vote (on-chain?!) to verify whether the promises have been kept.
+```
+$ politeia -v -testnet -rpchost 127.0.0.1 getslate 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5
+Electoral Slate
+Owner's Public Key: 82b70ed135f6b9b5f581a7a0fa5becc9d75d57fce26c6ea2572ec78aa4532267
+  Censorship record:
+    Merkle   : 9c8418bec3169bc1124dcd30e19132b127b816a3ced231f6589cd426713dcd59
+    Token    : 6a6f55d8db19c6736865592848f81c2bbe9aeb727a59b076b2d7d9960ae2b9b5
+    Signature: 0d0f0684557d0bd20284d29054964df07d728b47d43012cea9d0ba98e7491641e083dd3055b2168118eb47139db1fa8ca2c02dc3434a785256d3da5afdf28507
+
+Electoral promise 00:
+  Status     : public
+  Timestamp  : 2018-01-24 03:46:13 +0000 UTC
+  Censorship record:
+    Merkle   : 6e82da5a3c62c9866f2937456ee63d08d5e4eda453cf033ac3a68e747cb9c8fe
+    Token    : 02677541829a9bec6dfcede4e6b70358defd994676ad0e3d58044e775305ca1c
+    Signature: 8668f2bdb9110ba53bd23f1042b51243192c3a11d9f8dbaca4be85c2db2c43163707e8a1193796f08066085f0884d7fa204ba2b13dabe1b548177835d3bf5002
+  Metadata   : []
+  File (00)  :
+    Name     : its_economy_stupid.txt
+    MIME     : text/plain; charset=utf-8
+    Digest   : 6e82da5a3c62c9866f2937456ee63d08d5e4eda453cf033ac3a68e747cb9c8fe
+
+Electoral promise 01:
+  Status     : public
+  Timestamp  : 2018-01-24 03:46:06 +0000 UTC
+  Censorship record:
+    Merkle   : a5a3cd6ffe93c64bb010f7cde4d89946516059eaf3fe5bb45b10ffa75e0e3ecb
+    Token    : 3ccb5154c7d214fb671bd8025dc771ed38f0ac84592e7dd1c6b006497aebdea8
+    Signature: 51af970f819a2f9333d5b98fd69630d0a7954520b2aea89497ada6c3d75d3b36bb303541a2f99a86a0b9b15b1bbfb76d91f02aa3db9cae41d31f947bcde68004
+  Metadata   : []
+  File (00)  :
+    Name     : peace_in_our_time.txt
+    MIME     : text/plain; charset=utf-8
+    Digest   : a5a3cd6ffe93c64bb010f7cde4d89946516059eaf3fe5bb45b10ffa75e0e3ecb
+```
+
