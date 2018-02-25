@@ -60,11 +60,7 @@ func TestWriteReadAnchor(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	g := gitBackEnd{}
-	err = g.openDB(filepath.Join(dir, DefaultDbPath))
-	if err != nil {
-		t.Fatal(err)
-	}
+	g := gitBackEnd{vetted: filepath.Join(dir, defaultVettedPath)}
 	key := [sha256.Size]byte{0xaa, 0x55}
 	err = g.writeAnchorRecord(key, testAnchor)
 	if err != nil {
@@ -105,11 +101,7 @@ func TestWriteReadLastAnchor(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	g := gitBackEnd{}
-	err = g.openDB(filepath.Join(dir, DefaultDbPath))
-	if err != nil {
-		t.Fatal(err)
-	}
+	g := gitBackEnd{vetted: filepath.Join(dir, defaultVettedPath)}
 	err = g.writeLastAnchorRecord(testLastAnchor)
 	if err != nil {
 		t.Fatal(err)
