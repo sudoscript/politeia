@@ -40,38 +40,6 @@ import (
 // waiting for their confirmation.  Once an anchor is confirmed it should be
 // removed from this list; this operation SHALL be atomic.
 
-const (
-	DbVersion  uint32 = 1
-	VersionKey        = "version"
-)
-
-type Version struct {
-	Version uint32 // Database version
-	Time    int64  // Time of record creation
-}
-
-// encodeVersion encodes Version into a JSON byte slice.
-func encodeVersion(version Version) ([]byte, error) {
-	b, err := json.Marshal(version)
-	if err != nil {
-		return nil, err
-	}
-
-	return b, nil
-}
-
-// DecodeVersion decodes a JSON byte slice into a Version.
-func DecodeVersion(payload []byte) (*Version, error) {
-	var version Version
-
-	err := json.Unmarshal(payload, &version)
-	if err != nil {
-		return nil, err
-	}
-
-	return &version, nil
-}
-
 // AnchorType discriminates between the various Anchor record types.
 type AnchorType uint32
 

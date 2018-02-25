@@ -38,9 +38,6 @@ const (
 	// is ~3x of anchoring without internet delay.
 	LockDuration = 15 * time.Second
 
-	// DefaultDbPath is the database path.  Export for external utilities.
-	DefaultDbPath = "db"
-
 	// defaultUnvettedPath is the landing zone for unvetted content.
 	defaultUnvettedPath = "unvetted"
 
