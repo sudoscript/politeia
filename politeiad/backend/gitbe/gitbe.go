@@ -62,6 +62,10 @@ const (
 	// They are indexed by TX.
 	defaultAnchorsDirectory = "anchors"
 
+	// chainInformationSuffix is the file suffix for the dcrtime chain information
+	// for stored anchors
+	chainInformationSuffix = ".chain"
+
 	// defaultPayloadDir is the default path to store a record payload.
 	defaultPayloadDir = "payload"
 
@@ -923,13 +927,14 @@ func (g *gitBackEnd) afterAnchorVerify(vrs []v1.VerifyDigest, precious [][]byte)
 		if err != nil {
 			return err
 		}
-		err = ioutil.WriteFile(filepath.Join(anchorDir, vr.Digest),
+		chainInformationFilename := vr.Digest + chainInformationSuffix
+		err = ioutil.WriteFile(filepath.Join(anchorDir, chainInformationFilename),
 			ar, 0664)
 		if err != nil {
 			return err
 		}
 		err = g.gitAdd(g.vetted,
-			filepath.Join(defaultAnchorsDirectory, vr.Digest))
+			filepath.Join(defaultAnchorsDirectory, chainInformationFilename))
 		if err != nil {
 			return err
 		}
