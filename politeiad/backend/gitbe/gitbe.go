@@ -1784,58 +1784,51 @@ func (g *gitBackEnd) fsck(path string) error {
 	log.Infof("fsck: dcrtime verification started")
 	defer log.Infof("fsck: dcrtime verification completed")
 
-	// Iterate over all db records and pick out the anchors.  Take note of
-	// unanchored commits and exclude those from the precious list.
+	// Iterate over all anchor records on disk and pick out the anchors.
+	// Exclude records for the last anchor, unanchored commits, and chain information.
 	type AnchorT struct {
 		key    string
 		anchor *Anchor
 	}
 	var (
-		version      *Version
 		lastAnchor   *LastAnchor
 		unconfAnchor *UnconfirmedAnchor
 		anchors      []AnchorT
 	)
 
-	i := g.db.NewIterator(nil, nil)
-	for i.Next() {
-		// Guess what record type based on key
-		key := i.Key()
-		value := i.Value()
-		if string(key) == VersionKey {
-			version, err = DecodeVersion(value)
+	files, err := g.listAnchorRecords()
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		// Convert base64 payload to bytes
+		filePayload, err := base64.StdEncoding.DecodeString(file.Payload)
+		if err != nil {
+			return err
+		}
+		// Check record type based on filename
+		if file.Name == LastAnchorKey {
+			lastAnchor, err = DecodeLastAnchor(filePayload)
 			if err != nil {
 				return err
 			}
-			if version.Version != DbVersion {
-				return fmt.Errorf("fsck: version error got %v "+
-					"expected %v", version.Version,
-					DbVersion)
-			}
-		} else if string(key) == LastAnchorKey {
-			lastAnchor, err = DecodeLastAnchor(value)
+		} else if file.Name == UnconfirmedKey {
+			unconfAnchor, err = DecodeUnconfirmedAnchor(filePayload)
 			if err != nil {
 				return err
 			}
-		} else if string(key) == UnconfirmedKey {
-			unconfAnchor, err = DecodeUnconfirmedAnchor(value)
-			if err != nil {
-				return err
-			}
+		} else if strings.HasSuffix(file.Name, chainInformationSuffix) {
+			continue
 		} else {
-			anchor, err := DecodeAnchor(value)
+			anchor, err := DecodeAnchor(filePayload)
 			if err != nil {
 				return err
 			}
 			anchors = append(anchors, AnchorT{
-				key:    hex.EncodeToString(key),
+				key:    file.Name,
 				anchor: anchor,
 			})
 		}
-	}
-	i.Release()
-	if err := i.Error(); err != nil {
-		return err
 	}
 
 	if lastAnchor == nil || unconfAnchor == nil {

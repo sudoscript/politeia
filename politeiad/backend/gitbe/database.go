@@ -182,6 +182,33 @@ func (g *gitBackEnd) getAnchorRecordFromFile(anchorFilename string) ([]byte, err
 	return ioutil.ReadFile(anchorFilePath)
 }
 
+// listAnchorRecords returns a list of files in the anchor directory
+func (g *gitBackEnd) listAnchorRecords() ([]backend.File, error) {
+	anchorDir := filepath.Join(g.vetted, defaultAnchorsDirectory)
+	files, err := ioutil.ReadDir(anchorDir)
+	if err != nil {
+		return nil, err
+	}
+
+	bf := make([]backend.File, 0, len(files))
+	// Load all files
+	for _, file := range files {
+		fn := filepath.Join(anchorDir, file.Name())
+		if file.IsDir() {
+			return nil, fmt.Errorf("unexpected subdirectory found: %v", fn)
+		}
+
+		f := backend.File{Name: file.Name()}
+		f.MIME, f.Digest, f.Payload, err = util.LoadFile(fn)
+		if err != nil {
+			return nil, err
+		}
+		bf = append(bf, f)
+	}
+
+	return bf, nil
+}
+
 // writeAnchorRecord encodes and writes the supplied record to the
 // database.
 //
