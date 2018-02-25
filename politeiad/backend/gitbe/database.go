@@ -19,20 +19,22 @@ import (
 	"github.com/decred/politeia/util"
 )
 
-// The database contains 3 types of records:
-//	[lastanchor][LastAnchor]
-//	[Merkle Root][Anchor]
-//	[unconfirmed][UnconfirmedAnchor]
+// An anchor corresponds to a set of git commit hashes, along with their
+// merkle root, that are checkpointed in dcrtime. This provides censorship
+// resistance by "anchoring" activity on politeia to the blockchain.
 //
-// The LastAnchor record is used to persist the last committed anchor.  The
-// information that is contained in the record allows us to create a git log
-// range to calculate the new LastAnchor.  There is always one and only one
-// LastAnchor record in the database (with the exception when bootstrapping the
-// system).
+// In addition to the Anchor struct, we also store the LastAnchor and UnconfirmedAnchor.
+// We store anchors locally as JSON serializations of the corresponding structs.
 //
 // The anchor records simply contain all information that went into creating an
 // anchor and are essentially redundant from a data perspective.  We keep this
 // information for caching purposes so that we don't have to parse git output.
+//
+// The LastAnchor record is used to persist the last committed anchor.  The
+// information that is contained in the record allows us to create a git log
+// range to calculate the new LastAnchor.  There is always one and only one
+// LastAnchor record in the anchor directory (with the exception when bootstrapping the
+// system).
 //
 // The unconfirmed anchor records are a list of all anchor merkle roots that
 // have not been confirmed by dcrtime.  This record is used at startup time to
@@ -49,8 +51,8 @@ const (
 	AnchorVerified   AnchorType = 2 // Verified anchor
 )
 
-// Anchor is a database record where the merkle root of digests is the key.
-// This record is pointed at by LastAnchor.Root.
+// Anchor is stored in a file where the filename is the merkle root of digests.
+// This record is pointed at by a the file "lastanchor".
 //
 // len(Digests) == len(Messages) and index offsets are linked. e.g. Digests[15]
 // commit messages is in Messages[15].
@@ -178,7 +180,7 @@ func (g *gitBackEnd) listAnchorRecords() ([]backend.File, error) {
 }
 
 // writeAnchorRecord encodes and writes the supplied record to the
-// database.
+// anchor directory.
 //
 // This function must be called with the lock held.
 func (g *gitBackEnd) writeAnchorRecord(key [sha256.Size]byte, anchor Anchor) error {
@@ -240,7 +242,7 @@ func DecodeLastAnchor(payload []byte) (*LastAnchor, error) {
 }
 
 // writeLastAnchorRecord encodes and writes the supplied record to the
-// database.
+// anchor directory.
 //
 // This function must be called with the lock held.
 func (g *gitBackEnd) writeLastAnchorRecord(lastAnchor LastAnchor) error {
@@ -297,7 +299,7 @@ func DecodeUnconfirmedAnchor(payload []byte) (*UnconfirmedAnchor, error) {
 }
 
 // writeUnconfirmedAnchorRecord encodes and writes the supplied record to the
-// database.
+// anchor directory.
 //
 // This function must be called with the lock held.
 func (g *gitBackEnd) writeUnconfirmedAnchorRecord(unconfirmed UnconfirmedAnchor) error {

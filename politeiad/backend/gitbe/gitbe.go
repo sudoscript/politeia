@@ -583,11 +583,11 @@ func (g *gitBackEnd) deltaCommits(path string, lastAnchor []byte) ([]*[sha256.Si
 }
 
 // anchor takes a slice of commit digests and commit messages that are stored
-// in the local database once they are anchored in dcrtime.
+// in a local anchor directory once they are anchored in dcrtime.
 //
 // This function is being clever with the anchors.  It sends two values to
 // dcrtime.  The idea is that we anchor the merkle root of the provided set and
-// that is stored in the db.  The cleverness comes in that we *also* anchor all
+// that is stored in the anchor directory.  The cleverness comes in that we *also* anchor all
 // individual commit hashes.  We do the last bit in order to be able to
 // externally validate that a commit hash made it into the time stamp.  If we
 // don't do that we'd have to create a tool to verify individual hashes for the
@@ -678,7 +678,7 @@ func (g *gitBackEnd) anchorRepo(path string) (*[sha256.Size]byte, error) {
 		auditLines = append(auditLines, line)
 	}
 
-	// Create database record early for the same reason.
+	// Create anchor record early for the same reason.
 	anchorRecord, anchorKey, err := newAnchorRecord(AnchorUnverified,
 		digests, messages)
 	if err != nil {
@@ -725,13 +725,13 @@ func (g *gitBackEnd) anchorRepo(path string) (*[sha256.Size]byte, error) {
 		return nil, fmt.Errorf("gitLastDigest: %v", err)
 	}
 
-	// Commit anchor to database
+	// Commit anchor to storage
 	err = g.writeAnchorRecord(*anchorKey, *anchorRecord)
 	if err != nil {
 		return nil, fmt.Errorf("writeAnchorRecord: %v", err)
 	}
 
-	// Commit LastAnchor to database
+	// Commit LastAnchor to storage
 	mr := make([]byte, sha256.Size)
 	copy(mr, anchorKey[:])
 	la := LastAnchor{
@@ -936,7 +936,7 @@ func (g *gitBackEnd) afterAnchorVerify(vrs []v1.VerifyDigest, precious [][]byte)
 			return err
 		}
 
-		// Update database with dcrtime information
+		// Update anchor with dcrtime information
 		var d [sha256.Size]byte
 		dd, err := hex.DecodeString(vr.Digest)
 		if err != nil {
@@ -991,7 +991,7 @@ func (g *gitBackEnd) afterAnchorVerify(vrs []v1.VerifyDigest, precious [][]byte)
 		if err != nil {
 			return fmt.Errorf("gitLastDigest: %v", err)
 		}
-		// Commit LastAnchor to database
+		// Commit LastAnchor to storage
 		la := LastAnchor{
 			Last: extendSHA1(gitLastCommitDigest),
 			Time: time.Now().Unix(),
@@ -1002,7 +1002,7 @@ func (g *gitBackEnd) afterAnchorVerify(vrs []v1.VerifyDigest, precious [][]byte)
 		}
 	}
 
-	// Update database record
+	// Update unconfirmed anchor record
 	ua := UnconfirmedAnchor{Merkles: precious}
 	return g.writeUnconfirmedAnchorRecord(ua)
 }
@@ -1886,8 +1886,8 @@ func (g *gitBackEnd) fsck(path string) error {
 		return fmt.Errorf("dcrtime fsck failed")
 	}
 
-	// At this point we know the database is sane.  Now we need to
-	// reconcile git with the database.
+	// At this point we know the local anchors are sane.  Now we need to
+	// reconcile git with the anchors.
 	if len(gitDigests) != 0 {
 		for k := range gitDigests {
 			log.Errorf("unexpected digest: %v", k)
