@@ -28,7 +28,6 @@ import (
 	"github.com/marcopeereboom/lockfile"
 	"github.com/robfig/cron"
 	"github.com/subosito/norma"
-	"github.com/syndtr/goleveldb/leveldb"
 )
 
 const (
@@ -102,7 +101,6 @@ type file struct {
 // interface.
 type gitBackEnd struct {
 	lock        *lockfile.LockFile // Global lock
-	db          *leveldb.DB        // Database
 	cron        *cron.Cron         // Scheduler for periodic tasks
 	shutdown    bool               // Backend is shutdown
 	root        string             // Root directory
@@ -2142,7 +2140,6 @@ func (g *gitBackEnd) Close() {
 
 	g.shutdown = true
 	close(g.exit)
-	g.db.Close()
 }
 
 // newLocked runs the portion of new that has to be locked.
@@ -2181,12 +2178,6 @@ func (g *gitBackEnd) newLocked() error {
 
 	// Clone vetted repo into unvetted
 	err = g.gitClone(g.vetted, g.unvetted, defaultRepoConfig)
-	if err != nil {
-		return err
-	}
-
-	// Open DB
-	err = g.openDB(filepath.Join(g.root, DefaultDbPath))
 	if err != nil {
 		return err
 	}

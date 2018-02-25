@@ -6,12 +6,17 @@ package gitbe
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/decred/dcrtime/merkle"
-	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/decred/politeia/politeiad/backend"
+	"github.com/decred/politeia/util"
 )
 
 // The database contains 3 types of records:
@@ -92,6 +97,24 @@ type Anchor struct {
 	Transaction    string // Anchor transaction
 }
 
+// LastAnchor stores the last commit anchored in dcrtime.
+type LastAnchor struct {
+	Last   []byte // Last git digest that was anchored
+	Time   int64  // OS time when record was created
+	Merkle []byte // Merkle root that points to Anchor record, if valid
+}
+
+// UnconfirmedAnchor stores Merkle roots of anchors that have not been confirmed
+// yet by dcrtime.
+type UnconfirmedAnchor struct {
+	Merkles [][]byte // List of Merkle root that points to Anchor records
+}
+
+const (
+	LastAnchorKey  = "lastanchor"
+	UnconfirmedKey = "unconfirmed"
+)
+
 // newAnchorRecord creates an Anchor Record and the Merkle Root from the
 // provided pieces.  Note that the merkle root is of the git digests!
 func newAnchorRecord(t AnchorType, digests []*[sha256.Size]byte, messages []string) (*Anchor, *[sha256.Size]byte, error) {
@@ -141,6 +164,24 @@ func DecodeAnchor(payload []byte) (*Anchor, error) {
 	return &anchor, nil
 }
 
+// writeAnchorRecordToFile stores a JSON byte slice to a file in the anchors directory
+func (g *gitBackEnd) writeAnchorRecordToFile(anchorJSON []byte, anchorFilename string) error {
+	// Make sure directory exists
+	anchorDir := filepath.Join(g.vetted, defaultAnchorsDirectory)
+	err := os.MkdirAll(anchorDir, 0774)
+	if err != nil {
+		return err
+	}
+	anchorFilePath := filepath.Join(anchorDir, anchorFilename)
+	return ioutil.WriteFile(anchorFilePath, anchorJSON, 0664)
+}
+
+// getAnchorRecordFromFile gets a JSON byte slice from a file in the anchors directory
+func (g *gitBackEnd) getAnchorRecordFromFile(anchorFilename string) ([]byte, error) {
+	anchorFilePath := filepath.Join(g.vetted, defaultAnchorsDirectory, anchorFilename)
+	return ioutil.ReadFile(anchorFilePath)
+}
+
 // writeAnchorRecord encodes and writes the supplied record to the
 // database.
 //
@@ -156,11 +197,9 @@ func (g *gitBackEnd) writeAnchorRecord(key [sha256.Size]byte, anchor Anchor) err
 		return err
 	}
 
-	// Use a batch for now
-	batch := new(leveldb.Batch)
-	batch.Put(k, la)
-
-	return g.db.Write(batch, nil)
+	// Store to file
+	filename := hex.EncodeToString(k)
+	return g.writeAnchorRecordToFile(la, filename)
 }
 
 // readAnchorRecord retrieves the anchor record based on the provided merkle
@@ -171,26 +210,16 @@ func (g *gitBackEnd) readAnchorRecord(key [sha256.Size]byte) (*Anchor, error) {
 	// make key
 	k := make([]byte, sha256.Size)
 	copy(k, key[:])
+	filename := hex.EncodeToString(k)
 
-	// Get anchor from db
-	payload, err := g.db.Get(k, nil)
+	// Get anchor from file
+	payload, err := g.getAnchorRecordFromFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
 	// Decode
 	return DecodeAnchor(payload)
-}
-
-const (
-	LastAnchorKey = "lastanchor" // Key to identify LastAnchor
-)
-
-// LastAnchor record.
-type LastAnchor struct {
-	Last   []byte // Last git digest that was anchored
-	Time   int64  // OS time when record was created
-	Merkle []byte // Merkle root that points to Anchor record, if valid
 }
 
 // encodeLastAnchor encodes LastAnchor into a byte slice.
@@ -226,21 +255,19 @@ func (g *gitBackEnd) writeLastAnchorRecord(lastAnchor LastAnchor) error {
 		return err
 	}
 
-	// Use a batch for now
-	batch := new(leveldb.Batch)
-	batch.Put([]byte(LastAnchorKey), la)
-
-	return g.db.Write(batch, nil)
+	// Store anchor to file
+	return g.writeAnchorRecordToFile(la, LastAnchorKey)
 }
 
 // readLastAnchorRecord retrieves the last anchor record.
 //
 // This function must be called with the lock held.
 func (g *gitBackEnd) readLastAnchorRecord() (*LastAnchor, error) {
-	// Get last anchor from db
-	payload, err := g.db.Get([]byte(LastAnchorKey), nil)
+	// Get anchor from file
+	payload, err := g.getAnchorRecordFromFile(LastAnchorKey)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		// If one doesn't exist, create an empty LastAnchor
+		if os.IsNotExist(err) {
 			return &LastAnchor{}, nil
 		}
 		return nil, err
@@ -248,40 +275,6 @@ func (g *gitBackEnd) readLastAnchorRecord() (*LastAnchor, error) {
 
 	// Decode
 	return DecodeLastAnchor(payload)
-}
-
-// openDB opens and/or creates the backend database.  The database is versioned
-// and upgrade code should be added to this function when needed.
-func (g *gitBackEnd) openDB(path string) error {
-	var err error
-	g.db, err = leveldb.OpenFile(path, nil)
-	if err != nil {
-		return err
-	}
-
-	// See if we need to write a version record
-	exists, err := g.db.Has([]byte(VersionKey), nil)
-	if err != nil || exists {
-		return err
-	}
-
-	// Write version record
-	v, err := encodeVersion(Version{
-		Version: DbVersion,
-		Time:    time.Now().Unix(),
-	})
-	if err != nil {
-		return err
-	}
-	return g.db.Put([]byte(VersionKey), v, nil)
-}
-
-const (
-	UnconfirmedKey = "unconfirmed"
-)
-
-type UnconfirmedAnchor struct {
-	Merkles [][]byte // List of Merkle root that points to Anchor records
 }
 
 // encodeUnconfirmedAnchor encodes an UnconfirmedAnchor record into a JSON byte
@@ -319,21 +312,19 @@ func (g *gitBackEnd) writeUnconfirmedAnchorRecord(unconfirmed UnconfirmedAnchor)
 		return err
 	}
 
-	// Use a batch for now
-	batch := new(leveldb.Batch)
-	batch.Put([]byte(UnconfirmedKey), ua)
-
-	return g.db.Write(batch, nil)
+	// Store anchor to file
+	return g.writeAnchorRecordToFile(ua, UnconfirmedKey)
 }
 
 // readUnconfirmedAnchorRecord retrieves the unconfirmed anchor record.
 //
 // This function must be called with the lock held.
 func (g *gitBackEnd) readUnconfirmedAnchorRecord() (*UnconfirmedAnchor, error) {
-	// Get anchor from db
-	payload, err := g.db.Get([]byte(UnconfirmedKey), nil)
+	// Get anchor from file
+	payload, err := g.getAnchorRecordFromFile(UnconfirmedKey)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		// If one doesn't exist, create an empty UnconfimredAnchor
+		if os.IsNotExist(err) {
 			return &UnconfirmedAnchor{}, nil
 		}
 		return nil, err
