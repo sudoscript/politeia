@@ -23,26 +23,11 @@ import (
 
 // An anchor corresponds to a set of git commit hashes, along with their
 // merkle root, that are checkpointed in dcrtime. This provides censorship
-// resistance by "anchoring" activity on politeia to the blockchain.
+// resistance by anchoring activity on politeia to the blockchain.
 //
-// In addition to the Anchor struct, we also store the LastAnchor and UnconfirmedAnchor.
-// We store anchors locally as JSON serializations of the corresponding structs.
-//
-// The anchor records simply contain all information that went into creating an
-// anchor and are essentially redundant from a data perspective.  We keep this
-// information for caching purposes so that we don't have to parse git output.
-//
-// The LastAnchor record is used to persist the last committed anchor.  The
-// information that is contained in the record allows us to create a git log
-// range to calculate the new LastAnchor.  There is always one and only one
-// LastAnchor record in the anchor directory (with the exception when bootstrapping the
-// system).
-//
-// The unconfirmed anchor records are a list of all anchor merkle roots that
-// have not been confirmed by dcrtime.  This record is used at startup time to
-// identify what anchors have not been confirmed by dcrtime and to resume
-// waiting for their confirmation.  Once an anchor is confirmed it should be
-// removed from this list; this operation SHALL be atomic.
+// To help process anchors, we need to look up the last anchor and unconfirmed anchors that
+// have not been checkpointed in dcrtime yet. To identify these, we parse the
+// git log, which keeps a record of all anchors dropped and anchors confirmed.
 
 // AnchorType discriminates between the various Anchor record types.
 type AnchorType uint32
@@ -424,16 +409,42 @@ func (g *gitBackEnd) writeUnconfirmedAnchorRecord(unconfirmed UnconfirmedAnchor)
 //
 // This function must be called with the lock held.
 func (g *gitBackEnd) readUnconfirmedAnchorRecord() (*UnconfirmedAnchor, error) {
-	// Get anchor from file
-	payload, err := g.getAnchorRecordFromFile(UnconfirmedKey)
+	// Get the commits from the git log
+	gitCommits, err := g.getCommitsFromLog()
 	if err != nil {
-		// If one doesn't exist, create an empty UnconfimredAnchor
-		if os.IsNotExist(err) {
-			return &UnconfirmedAnchor{}, nil
-		}
 		return nil, err
 	}
 
-	// Decode
-	return DecodeUnconfirmedAnchor(payload)
+	// Iterate over the commits and store the Merkle roots of all anchors in an array and
+	// the confirmed anchors as keys in a map, which will make it faster to check
+	// membership later.
+	var merkleStr string
+	var allAnchors []string
+	confirmedAnchors := make(map[string]struct{}, len(gitCommits))
+	for _, commit := range gitCommits {
+		// Check the first line of the commit message to see if it is an
+		// anchor confirmation or an anchor.
+		if regexAnchorConfirmation.MatchString(commit.Message[0]) {
+			// There's a blank line between the marker header and the body
+			// The Merkle root of the confirmed anchor is the first word in the body
+			merkleStr = strings.Fields(commit.Message[2])[0]
+			confirmedAnchors[merkleStr] = struct{}{}
+			allAnchors = append(allAnchors, merkleStr)
+		} else if regexAnchor.MatchString(commit.Message[0]) {
+			// The Merkle root is on the same line as the marker header
+			merkleStr = regexAnchor.FindStringSubmatch(commit.Message[0])[1]
+			allAnchors = append(allAnchors, merkleStr)
+		}
+	}
+
+	// Now find anchors that haven't been confirmed yet
+	var ua UnconfirmedAnchor
+	for _, merkleStr := range allAnchors {
+		_, confirmed := confirmedAnchors[merkleStr]
+		if !confirmed {
+			ua.Merkles = append(ua.Merkles, []byte(merkleStr))
+		}
+	}
+
+	return &ua, nil
 }
