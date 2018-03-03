@@ -720,42 +720,6 @@ func (g *gitBackEnd) anchorRepo(path string) (*[sha256.Size]byte, error) {
 		return nil, fmt.Errorf("gitCommit: %v", err)
 	}
 
-	// git commit can't return the long digest.
-	gitLastCommitDigest, err := g.gitLastDigest(path)
-	if err != nil {
-		return nil, fmt.Errorf("gitLastDigest: %v", err)
-	}
-
-	// Commit anchor to storage
-	err = g.writeAnchorRecord(*anchorKey, *anchorRecord)
-	if err != nil {
-		return nil, fmt.Errorf("writeAnchorRecord: %v", err)
-	}
-
-	// Commit LastAnchor to storage
-	mr := make([]byte, sha256.Size)
-	copy(mr, anchorKey[:])
-	la := LastAnchor{
-		Last:   extendSHA1(gitLastCommitDigest),
-		Time:   anchorRecord.Time,
-		Merkle: mr,
-	}
-	err = g.writeLastAnchorRecord(la)
-	if err != nil {
-		return nil, fmt.Errorf("writeLastAnchorRecord: %v", err)
-	}
-
-	// Append merkle to unconfirmed anchor record
-	ua, err := g.readUnconfirmedAnchorRecord()
-	if err != nil {
-		return nil, err
-	}
-	ua.Merkles = append(ua.Merkles, mr)
-	err = g.writeUnconfirmedAnchorRecord(*ua)
-	if err != nil {
-		return nil, fmt.Errorf("writeUnconfirmedAnchorRecord: %v", err)
-	}
-
 	return anchorKey, nil
 }
 
@@ -936,25 +900,6 @@ func (g *gitBackEnd) afterAnchorVerify(vrs []v1.VerifyDigest, precious [][]byte)
 			return err
 		}
 
-		// Update anchor with dcrtime information
-		var d [sha256.Size]byte
-		dd, err := hex.DecodeString(vr.Digest)
-		if err != nil {
-			return err
-		}
-		copy(d[:], dd)
-		anchor, err := g.readAnchorRecord(d)
-		if err != nil {
-			return err
-		}
-		anchor.Type = AnchorVerified
-		anchor.ChainTimestamp = vr.ChainInformation.ChainTimestamp
-		anchor.Transaction = vr.ChainInformation.Transaction
-		err = g.writeAnchorRecord(d, *anchor)
-		if err != nil {
-			return err
-		}
-
 		// Mark test anchors as confirmed by dcrtime
 		if g.test {
 			g.testAnchors[vr.Digest] = true
@@ -983,28 +928,9 @@ func (g *gitBackEnd) afterAnchorVerify(vrs []v1.VerifyDigest, precious [][]byte)
 		if err != nil {
 			return err
 		}
-
-		// Update last anchor record so that we skip anchoring anchor
-		// commits
-		// git commit can't return the long digest.
-		gitLastCommitDigest, err := g.gitLastDigest(g.vetted)
-		if err != nil {
-			return fmt.Errorf("gitLastDigest: %v", err)
-		}
-		// Commit LastAnchor to storage
-		la := LastAnchor{
-			Last: extendSHA1(gitLastCommitDigest),
-			Time: time.Now().Unix(),
-		}
-		err = g.writeLastAnchorRecord(la)
-		if err != nil {
-			return fmt.Errorf("writeLastAnchorRecord: %v", err)
-		}
 	}
 
-	// Update unconfirmed anchor record
-	ua := UnconfirmedAnchor{Merkles: precious}
-	return g.writeUnconfirmedAnchorRecord(ua)
+	return nil
 }
 
 // safeReadUnconfirmedAnchorRecord is a wrapper around
@@ -1787,50 +1713,17 @@ func (g *gitBackEnd) fsck(path string) error {
 		key    string
 		anchor *Anchor
 	}
-	var (
-		lastAnchor   *LastAnchor
-		unconfAnchor *UnconfirmedAnchor
-		anchors      []AnchorT
-	)
+	var anchors []AnchorT
 
-	files, err := g.listAnchorRecords()
+	anchorRecords, keys, err := g.listAnchorRecords()
 	if err != nil {
 		return err
 	}
-	for _, file := range files {
-		// Convert base64 payload to bytes
-		filePayload, err := base64.StdEncoding.DecodeString(file.Payload)
-		if err != nil {
-			return err
-		}
-		// Check record type based on filename
-		if file.Name == LastAnchorKey {
-			lastAnchor, err = DecodeLastAnchor(filePayload)
-			if err != nil {
-				return err
-			}
-		} else if file.Name == UnconfirmedKey {
-			unconfAnchor, err = DecodeUnconfirmedAnchor(filePayload)
-			if err != nil {
-				return err
-			}
-		} else if strings.HasSuffix(file.Name, chainInformationSuffix) {
-			continue
-		} else {
-			anchor, err := DecodeAnchor(filePayload)
-			if err != nil {
-				return err
-			}
-			anchors = append(anchors, AnchorT{
-				key:    file.Name,
-				anchor: anchor,
-			})
-		}
-	}
-
-	if lastAnchor == nil || unconfAnchor == nil {
-		// This happens on first launch.
-		return nil
+	for i, _ := range anchorRecords {
+		anchors = append(anchors, AnchorT{
+			key:    keys[i],
+			anchor: anchorRecords[i],
+		})
 	}
 
 	// Peel out anchored commits and create a precious list to verify with
