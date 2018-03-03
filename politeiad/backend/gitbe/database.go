@@ -12,6 +12,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/decred/dcrtime/merkle"
@@ -84,6 +86,12 @@ const (
 	LastAnchorKey  = "lastanchor"
 	UnconfirmedKey = "unconfirmed"
 )
+
+type GitCommit struct {
+	Hash    string
+	Time    int64
+	Message []string
+}
 
 // newAnchorRecord creates an Anchor Record and the Merkle Root from the
 // provided pieces.  Note that the merkle root is of the git digests!
@@ -256,22 +264,121 @@ func (g *gitBackEnd) writeLastAnchorRecord(lastAnchor LastAnchor) error {
 	return g.writeAnchorRecordToFile(la, LastAnchorKey)
 }
 
+var (
+	regexCommitHash           = regexp.MustCompile("^commit\\s+(\\S+)")
+	regexCommitDate           = regexp.MustCompile("^Date:\\s+(.+)")
+	anchorConfirmationPattern = fmt.Sprintf("^\\s*%s\\s+(\\S+)", markerAnchorConfirmation)
+	regexAnchorConfirmation   = regexp.MustCompile(anchorConfirmationPattern)
+	anchorPattern             = fmt.Sprintf("^\\s*%s\\s+(\\S+)", markerAnchor)
+	regexAnchor               = regexp.MustCompile(anchorPattern)
+)
+
+const (
+	dateTemplate = "Mon Jan 2 15:04:05 2006 -0700"
+)
+
+// extractNextCommit takes a slice of a git log and parses the next commit into a GitCommit struct
+func extractNextCommit(logSlice []string) (*GitCommit, int, error) {
+	var commit GitCommit
+
+	// Make sure we're at the start of a new commit
+	firstLine := logSlice[0]
+	if !regexCommitHash.MatchString(firstLine) {
+		return nil, 0, fmt.Errorf("Error parsing git log. Commit expected, found %q instead", firstLine)
+	}
+	commit.Hash = regexCommitHash.FindStringSubmatch(logSlice[0])[1]
+
+	// Skip the next line, which has the commit author
+
+	dateLine := logSlice[2]
+	if !regexCommitDate.MatchString(dateLine) {
+		return nil, 0, fmt.Errorf("Error parsing git log. Date expected, found %q instead", dateLine)
+	}
+	dateStr := regexCommitDate.FindStringSubmatch(logSlice[2])[1]
+	commitTime, err := time.Parse(dateTemplate, dateStr)
+	if err != nil {
+		return nil, 0, fmt.Errorf("Error parsing git log. Unable to parse date: %v", err)
+	}
+	commit.Time = commitTime.Unix()
+
+	// The first three lines are the commit hash, the author, and the date.
+	// The fourth is a blank line. Start accumulating the message at the 5th line.
+	// Append message lines until the start of the next commit is found.
+	for _, line := range logSlice[4:] {
+		if regexCommitHash.MatchString(line) {
+			break
+		}
+
+		commit.Message = append(commit.Message, line)
+	}
+
+	// In total, we used 4 lines initially, plus the number of lines in the message.
+	return &commit, len(commit.Message) + 4, nil
+}
+
+func (g *gitBackEnd) getCommitsFromLog() ([]*GitCommit, error) {
+	// Get the git log
+	gitLog, err := g.gitLog(g.vetted)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the log into GitCommit structs for easier processing
+	var commits []*GitCommit
+	currLine := 0
+	for currLine < len(gitLog) {
+		nextCommit, linesUsed, err := extractNextCommit(gitLog[currLine:])
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("%+v\n", nextCommit)
+		commits = append(commits, nextCommit)
+		currLine = currLine + linesUsed
+	}
+
+	return commits, nil
+}
+
 // readLastAnchorRecord retrieves the last anchor record.
 //
 // This function must be called with the lock held.
 func (g *gitBackEnd) readLastAnchorRecord() (*LastAnchor, error) {
-	// Get anchor from file
-	payload, err := g.getAnchorRecordFromFile(LastAnchorKey)
+	// Get the commits from the log
+	gitCommits, err := g.getCommitsFromLog()
 	if err != nil {
-		// If one doesn't exist, create an empty LastAnchor
-		if os.IsNotExist(err) {
-			return &LastAnchor{}, nil
-		}
 		return nil, err
 	}
 
-	// Decode
-	return DecodeLastAnchor(payload)
+	// Iterate over commits to find the last anchor
+	var found bool
+	var la LastAnchor
+	var anchorCommit *GitCommit
+	for _, commit := range gitCommits {
+		// Check the first line of the commit message
+		// Make sure it is an anchor, not an anchor confirmation
+		if !regexAnchorConfirmation.MatchString(commit.Message[0]) &&
+			regexAnchor.MatchString(commit.Message[0]) {
+			found = true
+			anchorCommit = commit
+			break
+		}
+	}
+	// If not found, return a blank last anchor
+	if !found {
+		return &la, nil
+	}
+
+	merkleStr := regexAnchor.FindStringSubmatch(anchorCommit.Message[0])[1]
+	la.Merkle = []byte(merkleStr)
+	la.Time = anchorCommit.Time
+
+	// The latest commit hash is the top line, and the hash is the first word in the line.
+	// There's a blank space in between the marker line and the list of commit hashes.
+	topCommitLine := anchorCommit.Message[2]
+	topCommitHash := strings.Fields(topCommitLine)[0]
+	la.Last = []byte(topCommitHash)
+
+	return &la, nil
 }
 
 // encodeUnconfirmedAnchor encodes an UnconfirmedAnchor record into a JSON byte

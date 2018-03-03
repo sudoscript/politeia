@@ -93,26 +93,3 @@ func TestEncodeDecodeLastAnchor(t *testing.T) {
 			spew.Sdump(*la2))
 	}
 }
-
-func TestWriteReadLastAnchor(t *testing.T) {
-	dir, err := ioutil.TempDir("", "politeia.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	g := gitBackEnd{vetted: filepath.Join(dir, defaultVettedPath)}
-	err = g.writeLastAnchorRecord(testLastAnchor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	la2, err := g.readLastAnchorRecord()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !reflect.DeepEqual(testLastAnchor, *la2) {
-		t.Fatalf("want %v got %v", spew.Sdump(testLastAnchor),
-			spew.Sdump(*la2))
-	}
-}

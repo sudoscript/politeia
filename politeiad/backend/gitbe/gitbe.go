@@ -73,6 +73,11 @@ const (
 	// expectedTestTX is a fake TX used by unit tests.
 	expectedTestTX = "TESTTX"
 
+	// markerAnchor is used in commit messages to determine
+	// where an anchor has been committed.  This value is
+	// parsed and therefore must be a const.
+	markerAnchor = "Anchor"
+
 	// markerAnchorConfirmation is used in commit messages to determine
 	// where an anchor confirmation has been committed.  This value is
 	// parsed and therefore must be a const.
@@ -699,7 +704,7 @@ func (g *gitBackEnd) anchorRepo(path string) (*[sha256.Size]byte, error) {
 	}
 
 	// Prefix commitMessage with merkle root
-	commitMessage = fmt.Sprintf("Anchor %x\n\n%v", *anchorKey,
+	commitMessage = fmt.Sprintf("%v %x\n\n%v", markerAnchor, *anchorKey,
 		commitMessage)
 
 	// Commit merkle root as an anchor and append included commits to audit
