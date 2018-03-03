@@ -7,18 +7,12 @@ package gitbe
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/decred/dcrtime/merkle"
-	"github.com/decred/politeia/politeiad/backend"
-	"github.com/decred/politeia/util"
 )
 
 // An anchor corresponds to a set of git commit hashes, along with their
@@ -67,11 +61,6 @@ type UnconfirmedAnchor struct {
 	Merkles [][]byte // List of Merkle root that points to Anchor records
 }
 
-const (
-	LastAnchorKey  = "lastanchor"
-	UnconfirmedKey = "unconfirmed"
-)
-
 // newAnchorRecord creates an Anchor Record and the Merkle Root from the
 // provided pieces.  Note that the merkle root is of the git digests!
 func newAnchorRecord(t AnchorType, digests []*[sha256.Size]byte, messages []string) (*Anchor, *[sha256.Size]byte, error) {
@@ -99,148 +88,6 @@ func newAnchorRecord(t AnchorType, digests []*[sha256.Size]byte, messages []stri
 	return &a, merkle.Root(digests), nil
 }
 
-// encodeAnchor encodes Anchor into a JSON byte slice.
-func encodeAnchor(anchor Anchor) ([]byte, error) {
-	b, err := json.Marshal(anchor)
-	if err != nil {
-		return nil, err
-	}
-
-	return b, nil
-}
-
-// DecodeAnchor decodes a JSON byte slice into an Anchor.
-func DecodeAnchor(payload []byte) (*Anchor, error) {
-	var anchor Anchor
-
-	err := json.Unmarshal(payload, &anchor)
-	if err != nil {
-		return nil, err
-	}
-
-	return &anchor, nil
-}
-
-// writeAnchorRecordToFile stores a JSON byte slice to a file in the anchors directory
-func (g *gitBackEnd) writeAnchorRecordToFile(anchorJSON []byte, anchorFilename string) error {
-	// Make sure directory exists
-	anchorDir := filepath.Join(g.vetted, defaultAnchorsDirectory)
-	err := os.MkdirAll(anchorDir, 0774)
-	if err != nil {
-		return err
-	}
-	anchorFilePath := filepath.Join(anchorDir, anchorFilename)
-	return ioutil.WriteFile(anchorFilePath, anchorJSON, 0664)
-}
-
-// getAnchorRecordFromFile gets a JSON byte slice from a file in the anchors directory
-func (g *gitBackEnd) getAnchorRecordFromFile(anchorFilename string) ([]byte, error) {
-	anchorFilePath := filepath.Join(g.vetted, defaultAnchorsDirectory, anchorFilename)
-	return ioutil.ReadFile(anchorFilePath)
-}
-
-// listAnchorRecords returns a list of files in the anchor directory
-func (g *gitBackEnd) listAnchorRecords() ([]backend.File, error) {
-	anchorDir := filepath.Join(g.vetted, defaultAnchorsDirectory)
-	files, err := ioutil.ReadDir(anchorDir)
-	if err != nil {
-		return nil, err
-	}
-
-	bf := make([]backend.File, 0, len(files))
-	// Load all files
-	for _, file := range files {
-		fn := filepath.Join(anchorDir, file.Name())
-		if file.IsDir() {
-			return nil, fmt.Errorf("unexpected subdirectory found: %v", fn)
-		}
-
-		f := backend.File{Name: file.Name()}
-		f.MIME, f.Digest, f.Payload, err = util.LoadFile(fn)
-		if err != nil {
-			return nil, err
-		}
-		bf = append(bf, f)
-	}
-
-	return bf, nil
-}
-
-// writeAnchorRecord encodes and writes the supplied record to the
-// anchor directory.
-//
-// This function must be called with the lock held.
-func (g *gitBackEnd) writeAnchorRecord(key [sha256.Size]byte, anchor Anchor) error {
-	// make key
-	k := make([]byte, sha256.Size)
-	copy(k, key[:])
-
-	// Encode
-	la, err := encodeAnchor(anchor)
-	if err != nil {
-		return err
-	}
-
-	// Store to file
-	filename := hex.EncodeToString(k)
-	return g.writeAnchorRecordToFile(la, filename)
-}
-
-// readAnchorRecord retrieves the anchor record based on the provided merkle
-// root.
-//
-// This function must be called with the lock held.
-func (g *gitBackEnd) readAnchorRecord(key [sha256.Size]byte) (*Anchor, error) {
-	// make key
-	k := make([]byte, sha256.Size)
-	copy(k, key[:])
-	filename := hex.EncodeToString(k)
-
-	// Get anchor from file
-	payload, err := g.getAnchorRecordFromFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	// Decode
-	return DecodeAnchor(payload)
-}
-
-// encodeLastAnchor encodes LastAnchor into a byte slice.
-func encodeLastAnchor(lastAnchor LastAnchor) ([]byte, error) {
-	b, err := json.Marshal(lastAnchor)
-	if err != nil {
-		return nil, err
-	}
-
-	return b, nil
-}
-
-// DecodeLastAnchor decodes a payload into a LastAnchor.
-func DecodeLastAnchor(payload []byte) (*LastAnchor, error) {
-	var lastAnchor LastAnchor
-
-	err := json.Unmarshal(payload, &lastAnchor)
-	if err != nil {
-		return nil, err
-	}
-
-	return &lastAnchor, nil
-}
-
-// writeLastAnchorRecord encodes and writes the supplied record to the
-// anchor directory.
-//
-// This function must be called with the lock held.
-func (g *gitBackEnd) writeLastAnchorRecord(lastAnchor LastAnchor) error {
-	// Encode
-	la, err := encodeLastAnchor(lastAnchor)
-	if err != nil {
-		return err
-	}
-
-	// Store anchor to file
-	return g.writeAnchorRecordToFile(la, LastAnchorKey)
 type GitCommit struct {
 	Hash    string
 	Time    int64
@@ -321,9 +168,115 @@ func (g *gitBackEnd) getCommitsFromLog() ([]*GitCommit, error) {
 	return commits, nil
 }
 
+// extractAnchorDigests returns a list of digest bytes from an anchor GitCommit,
+// as well as a list of commit messages for what was commited
+func extractAnchorDigests(anchorCommit *GitCommit) ([][]byte, []string, error) {
+	// Make sure it is an anchor commit
+	firstLine := anchorCommit.Message[0]
+	if !regexAnchor.MatchString(firstLine) {
+		return nil, nil, fmt.Errorf("Error parsing git log. Expected an anchor commit. Instead got %q", firstLine)
+	}
+
+	// Hashes are listed starting from the 3rd line in the commit message
+	// The hash is the first word in the line. The commit message is the rest.
+	// Ignore the last blank line
+	var digests [][]byte
+	var messages []string
+	for _, line := range anchorCommit.Message[2 : len(anchorCommit.Message)-1] {
+		digests = append(digests, []byte(
+			strings.Fields(line)[0]),
+		)
+		messages = append(messages, strings.Join(
+			strings.Fields(line)[1:], " "),
+		)
+	}
+
+	return digests, messages, nil
+}
+
+// listAnchorRecords extracts all anchor records from the git log and returns
+// an array of Anchor structs and an array of their Merkle roots
+func (g *gitBackEnd) listAnchorRecords() ([]*Anchor, []string, error) {
+	// Get the commits from the git log
+	gitCommits, err := g.getCommitsFromLog()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Store anchor commits in an array and confirmed anchors as keys in a map,
+	// to check for confirmation status later.
+	var merkleStr string
+	var anchorCommits []*GitCommit
+	confirmedAnchors := make(map[string]struct{})
+	for _, commit := range gitCommits {
+		// Check the first line of the commit message to see if it is an
+		// anchor confirmation or an anchor.
+		if regexAnchorConfirmation.MatchString(commit.Message[0]) {
+			// There's a blank line between the marker header and the body
+			// The Merkle root of the confirmed anchor is the first word in the body
+			merkleStr = strings.Fields(commit.Message[2])[0]
+			confirmedAnchors[merkleStr] = struct{}{}
+		} else if regexAnchor.MatchString(commit.Message[0]) {
+			anchorCommits = append(anchorCommits, commit)
+		}
+	}
+
+	// Create Anchor structs for each anchor record in git
+	var anchors []*Anchor
+	var keys, messages []string
+	var anchorType AnchorType
+	var digests [][]byte
+	for _, commit := range anchorCommits {
+		// The Merkle root is on the same line as the marker header
+		merkleStr = regexAnchor.FindStringSubmatch(commit.Message[0])[1]
+		keys = append(keys, merkleStr)
+
+		// Check status
+		anchorType = AnchorUnverified
+		_, confirmed := confirmedAnchors[merkleStr]
+		if confirmed {
+			anchorType = AnchorVerified
+		}
+
+		// Extract commit hashes and messages
+		digests, messages, err = extractAnchorDigests(commit)
+		if err != nil {
+			return nil, nil, err
+		}
+		anchors = append(anchors, &Anchor{
+			Type:     anchorType,
+			Digests:  digests,
+			Messages: messages,
+			Time:     commit.Time,
+		})
+	}
+
+	return anchors, keys, nil
+}
+
+// readAnchorRecord matches an anchor by its Merkle root and retrieves it from the git log
+func (g *gitBackEnd) readAnchorRecord(key [sha256.Size]byte) (*Anchor, error) {
+	anchors, keys, err := g.listAnchorRecords()
+	if err != nil {
+		return nil, err
+	}
+	var anchor *Anchor
+	merkleStr := hex.EncodeToString(key[:])
+	for i, _ := range anchors {
+		if merkleStr == keys[i] {
+			anchor = anchors[i]
+			break
+		}
+	}
+	if anchor == nil {
+		return nil, fmt.Errorf("Anchor not found for key %v", key)
+	}
+
+	return anchor, nil
+
+}
+
 // readLastAnchorRecord retrieves the last anchor record.
-//
-// This function must be called with the lock held.
 func (g *gitBackEnd) readLastAnchorRecord() (*LastAnchor, error) {
 	// Get the commits from the log
 	gitCommits, err := g.getCommitsFromLog()
@@ -351,60 +304,23 @@ func (g *gitBackEnd) readLastAnchorRecord() (*LastAnchor, error) {
 	}
 
 	merkleStr := regexAnchor.FindStringSubmatch(anchorCommit.Message[0])[1]
-	la.Merkle = []byte(merkleStr)
+	merkleBytes, err := hex.DecodeString(merkleStr)
+	if err != nil {
+		return nil, err
+	}
+	la.Merkle = merkleBytes
 	la.Time = anchorCommit.Time
 
-	// The latest commit hash is the top line, and the hash is the first word in the line.
-	// There's a blank space in between the marker line and the list of commit hashes.
-	topCommitLine := anchorCommit.Message[2]
-	topCommitHash := strings.Fields(topCommitLine)[0]
-	la.Last = []byte(topCommitHash)
+	hashBytes, err := hex.DecodeString(anchorCommit.Hash)
+	if err != nil {
+		return nil, err
+	}
+	la.Last = extendSHA1(hashBytes)
 
 	return &la, nil
 }
 
-// encodeUnconfirmedAnchor encodes an UnconfirmedAnchor record into a JSON byte
-// slice.
-func encodeUnconfirmedAnchor(unconfirmed UnconfirmedAnchor) ([]byte, error) {
-	b, err := json.Marshal(unconfirmed)
-	if err != nil {
-		return nil, err
-	}
-
-	return b, nil
-}
-
-// DecodeUnconfirmedAnchor decodes a JSON byte slice into an UnconfirmedAnchor
-// record.
-func DecodeUnconfirmedAnchor(payload []byte) (*UnconfirmedAnchor, error) {
-	var unconfirmed UnconfirmedAnchor
-
-	err := json.Unmarshal(payload, &unconfirmed)
-	if err != nil {
-		return nil, err
-	}
-
-	return &unconfirmed, nil
-}
-
-// writeUnconfirmedAnchorRecord encodes and writes the supplied record to the
-// anchor directory.
-//
-// This function must be called with the lock held.
-func (g *gitBackEnd) writeUnconfirmedAnchorRecord(unconfirmed UnconfirmedAnchor) error {
-	// Encode
-	ua, err := encodeUnconfirmedAnchor(unconfirmed)
-	if err != nil {
-		return err
-	}
-
-	// Store anchor to file
-	return g.writeAnchorRecordToFile(ua, UnconfirmedKey)
-}
-
 // readUnconfirmedAnchorRecord retrieves the unconfirmed anchor record.
-//
-// This function must be called with the lock held.
 func (g *gitBackEnd) readUnconfirmedAnchorRecord() (*UnconfirmedAnchor, error) {
 	// Get the commits from the git log
 	gitCommits, err := g.getCommitsFromLog()
