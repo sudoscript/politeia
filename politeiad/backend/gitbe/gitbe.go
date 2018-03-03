@@ -563,6 +563,11 @@ func (g *gitBackEnd) deltaCommits(path string, lastAnchor []byte) ([]*[sha256.Si
 			return nil, nil, nil, fmt.Errorf("invalid log")
 		}
 
+		// Ignore anchor confirmation commits
+		if regexAnchorConfirmation.MatchString(ds[1]) {
+			continue
+		}
+
 		// Validate returned digest
 		sha1Digest, err := hex.DecodeString(ds[0])
 		if err != nil {
@@ -578,6 +583,10 @@ func (g *gitBackEnd) deltaCommits(path string, lastAnchor []byte) ([]*[sha256.Si
 		// Fill out return values
 		digests = append(digests, &sha256Digest)
 		commitMessages = append(commitMessages, ds[1])
+	}
+
+	if len(digests) == 0 {
+		return nil, nil, nil, errNothingToDo
 	}
 
 	return digests, commitMessages, out, nil
