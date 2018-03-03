@@ -72,12 +72,6 @@ const (
 	UnconfirmedKey = "unconfirmed"
 )
 
-type GitCommit struct {
-	Hash    string
-	Time    int64
-	Message []string
-}
-
 // newAnchorRecord creates an Anchor Record and the Merkle Root from the
 // provided pieces.  Note that the merkle root is of the git digests!
 func newAnchorRecord(t AnchorType, digests []*[sha256.Size]byte, messages []string) (*Anchor, *[sha256.Size]byte, error) {
@@ -247,19 +241,23 @@ func (g *gitBackEnd) writeLastAnchorRecord(lastAnchor LastAnchor) error {
 
 	// Store anchor to file
 	return g.writeAnchorRecordToFile(la, LastAnchorKey)
+type GitCommit struct {
+	Hash    string
+	Time    int64
+	Message []string
 }
 
 var (
 	regexCommitHash           = regexp.MustCompile("^commit\\s+(\\S+)")
 	regexCommitDate           = regexp.MustCompile("^Date:\\s+(.+)")
-	anchorConfirmationPattern = fmt.Sprintf("^\\s*%s\\s+(\\S+)", markerAnchorConfirmation)
+	anchorConfirmationPattern = fmt.Sprintf("^\\s*%s\\s*$", markerAnchorConfirmation)
 	regexAnchorConfirmation   = regexp.MustCompile(anchorConfirmationPattern)
 	anchorPattern             = fmt.Sprintf("^\\s*%s\\s+(\\S+)", markerAnchor)
 	regexAnchor               = regexp.MustCompile(anchorPattern)
 )
 
 const (
-	dateTemplate = "Mon Jan 2 15:04:05 2006 -0700"
+	gitDateTemplate = "Mon Jan 2 15:04:05 2006 -0700"
 )
 
 // extractNextCommit takes a slice of a git log and parses the next commit into a GitCommit struct
@@ -280,7 +278,7 @@ func extractNextCommit(logSlice []string) (*GitCommit, int, error) {
 		return nil, 0, fmt.Errorf("Error parsing git log. Date expected, found %q instead", dateLine)
 	}
 	dateStr := regexCommitDate.FindStringSubmatch(logSlice[2])[1]
-	commitTime, err := time.Parse(dateTemplate, dateStr)
+	commitTime, err := time.Parse(gitDateTemplate, dateStr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("Error parsing git log. Unable to parse date: %v", err)
 	}
@@ -316,7 +314,6 @@ func (g *gitBackEnd) getCommitsFromLog() ([]*GitCommit, error) {
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("%+v\n", nextCommit)
 		commits = append(commits, nextCommit)
 		currLine = currLine + linesUsed
 	}
@@ -429,7 +426,6 @@ func (g *gitBackEnd) readUnconfirmedAnchorRecord() (*UnconfirmedAnchor, error) {
 			// The Merkle root of the confirmed anchor is the first word in the body
 			merkleStr = strings.Fields(commit.Message[2])[0]
 			confirmedAnchors[merkleStr] = struct{}{}
-			allAnchors = append(allAnchors, merkleStr)
 		} else if regexAnchor.MatchString(commit.Message[0]) {
 			// The Merkle root is on the same line as the marker header
 			merkleStr = regexAnchor.FindStringSubmatch(commit.Message[0])[1]
@@ -442,7 +438,12 @@ func (g *gitBackEnd) readUnconfirmedAnchorRecord() (*UnconfirmedAnchor, error) {
 	for _, merkleStr := range allAnchors {
 		_, confirmed := confirmedAnchors[merkleStr]
 		if !confirmed {
-			ua.Merkles = append(ua.Merkles, []byte(merkleStr))
+			merkleBytes, err := hex.DecodeString(merkleStr)
+			if err != nil {
+				fmt.Printf("error decoding string: %s", merkleStr)
+				return nil, err
+			}
+			ua.Merkles = append(ua.Merkles, merkleBytes)
 		}
 	}
 
